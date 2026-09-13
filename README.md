@@ -1,16 +1,20 @@
 # Audiobook Workbench
-Want to support the project? Find me on [Patreon](https://patreon.com/Bageena?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink)
+
+> Want to support the project? You can find me on [Patreon](https://patreon.com/Bageena?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink).
+>
+> There are no paid or locked features—only my appreciation and the warm fuzzy feeling of helping an independent project continue.
+
 > **Status: Work in Progress**
 >
-> Audiobook Workbench is still under active development, testing, and refinement. It is not currently recommended for general installation or production use.
+> Audiobook Workbench is under active development, testing, and refinement. It is not yet recommended for general installation or production use.
 
 ## Overview
 
 **Audiobook Workbench** is an open-source, local web application for preparing, organizing, and preserving audiobooks.
 
-Built with **Node.js**, it provides a browser-based interface while performing file processing locally on your own computer. It is intended primarily for Windows, though it may also be possible to run it in a Docker container depending on the configuration and installation files included with the project.
+Built with **Node.js**, it provides a browser-based interface while processing files locally on your own computer. It is primarily intended for Windows, though Docker support may be possible depending on the configuration and installation files included with the project.
 
-Audiobook Workbench began as a collection of practical Windows batch-file workflows for audiobook conversion, merging, chaptering, and metadata work. Those batch files became the functional foundation of the project. With assistance from Gemini, the original workflows were translated and expanded into a Node.js web application with a browser-based interface.
+Audiobook Workbench began as a collection of practical Windows batch-file workflows for audiobook conversion, merging, chaptering, and metadata work. Those batch files became the functional foundation of the project. With assistance from Gemini, the workflows were translated and expanded into a Node.js web application with a browser-based interface.
 
 Original source audio files are never intentionally modified, and the application does not automatically delete files.
 
@@ -25,7 +29,7 @@ Original source audio files are never intentionally modified, and the applicatio
 - Edit audiobook metadata, including title, author, narrator, cover art, and other supported fields
 - Download YouTube audio in MP3 format and process it through the same workflow
 - Preserve original audio files; the app is designed not to overwrite, alter, or automatically delete them
-- Run locally as a Node.js web app
+- Run locally as a Node.js web application
 - Potentially run in Docker for users who prefer a containerized environment
 - Open-source code available for inspection, learning, testing, and improvement
 
@@ -33,25 +37,25 @@ Original source audio files are never intentionally modified, and the applicatio
 
 Audiobook Workbench is not a professionally engineered commercial application. It is a personal project built through experimentation, iterative testing, trial and error, and a considerable amount of AI-assisted development.
 
-The project is, frankly, heavily “vibe coded.”
+Put plainly: this project is heavily “vibe coded.”
 
-The core functionality began as a set of Windows batch files developed for personal audiobook-processing workflows. Gemini was used to help turn those batch-file processes into a Node.js web application and to expand them into a browser-based interface.
+The core functionality began as a set of Windows batch files developed for personal audiobook-processing workflows. Gemini was used to help turn those processes into a Node.js web application and expand them into a browser-based interface.
 
-That does not mean the project is unsafe or unusable, but it does mean there may be rough edges, unexpected bugs, incomplete error handling, environment-specific assumptions, and features that have not been tested across every possible configuration.
+That does not mean the project is unsafe or unusable. It does mean there may be rough edges, unexpected bugs, incomplete error handling, environment-specific assumptions, and features that have not been tested in every possible configuration.
 
 The code is fully open source. Please feel free to inspect it, learn from it, report problems, suggest improvements, or contribute fixes.
 
-If you choose to test the application, use copies of your files and verify the resulting audiobook before relying on it for a large, valuable, or irreplaceable collection.
+If you choose to test the application, use copies of your files and verify the finished audiobook before relying on it for a large, valuable, or irreplaceable collection.
 
 ## How It Works
 
 Audiobook Workbench is intended to run locally rather than as a public cloud service.
 
-You start the application on your computer, then access its interface through a web browser. The browser provides the GUI, while the actual file processing takes place on your local system.
+You start the application on your computer and access its interface through a web browser. The browser provides the GUI, while file processing takes place on your local system.
 
 The application is primarily intended for Windows because its original workflows were based on `.bat` files.
 
-Docker compatibility may be possible, but should be considered experimental unless this repository includes maintained Docker configuration files and installation documentation.
+Docker compatibility may be possible, but should be considered experimental unless this repository includes maintained Docker configuration files and installation instructions.
 
 A Docker setup will generally need persistent mounted folders for:
 
@@ -63,20 +67,20 @@ A Docker setup will generally need persistent mounted folders for:
 
 ## File Safety
 
-Audiobook Workbench is designed with preservation in mind.
+Audiobook Workbench is designed with preservation in mind:
 
 - Source audio files should not be altered
 - Original files should not be overwritten
 - Nothing should be deleted automatically
 - Output and working files should be created separately from source files
 
-Even so, this is work-in-progress software. Always maintain backups and test the application with copies of your files before using it on an important collection.
+Even so, this is work-in-progress software. Always maintain backups and test the application with copies before using it on an important collection.
 
 ## Windows Security Notice
 
-Because Audiobook Workbench is not distributed by a registered Windows trusted publisher, Windows SmartScreen may show a security warning when you run downloaded batch files, scripts, or executables.
+Because Audiobook Workbench is not distributed by a registered Windows trusted publisher, Windows SmartScreen may display a warning when you run downloaded batch files, scripts, or executables.
 
-This does not automatically mean that the project is harmful. However, you should only download and run the application from a source you trust. If possible, inspect the included scripts and source code before running them.
+This does not automatically mean the project is harmful. However, download it only from a source you trust. If possible, inspect the included scripts and source code before running them.
 
 ### Removing the Windows Download Block
 
@@ -89,7 +93,7 @@ Before extracting a downloaded `.zip` or `.rar` archive:
 5. Click **Apply**, then **OK**.
 6. Extract the archive normally.
 
-Unblocking the archive before extraction can prevent Windows from applying its “downloaded from the internet” security marker to the extracted files, which may reduce warning prompts when launching included scripts.
+Unblocking the archive before extraction can prevent Windows from applying its “downloaded from the internet” security marker to extracted files. This may reduce warning prompts when launching included scripts.
 
 ## Intended Use
 
