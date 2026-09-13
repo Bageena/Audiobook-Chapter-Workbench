@@ -1,0 +1,42 @@
+{
+  "ffmpeg_path": "ffmpeg",
+  "ffprobe_path": "ffprobe",
+  "whisper_profile": "turbo",
+  "profiles": {
+    "turbo": {
+      "model": "large-v3-turbo",
+      "language": "en",
+      "device_preference": "cuda",
+      "compute_type_cuda": "float16",
+      "compute_type_cpu": "int8",
+      "batch_size_cuda": 4,
+      "batch_size_cpu": 1,
+      "alignment": true
+    },
+    "accurate": {
+      "model": "large-v3",
+      "language": "en",
+      "device_preference": "cuda",
+      "compute_type_cuda": "float16",
+      "compute_type_cpu": "int8",
+      "batch_size_cuda": 2,
+      "batch_size_cpu": 1,
+      "alignment": true
+    },
+    "cpu": {
+      "model": "medium.en",
+      "language": "en",
+      "device_preference": "cpu",
+      "compute_type_cpu": "int8",
+      "batch_size_cpu": 1,
+      "alignment": true
+    }
+  },
+  "m4b_settings": {
+    "audio_codec": "aac",
+    "bitrate_mono": "64k",
+    "bitrate_stereo": "96k",
+    "sample_rate": 44100
+  },
+  "lead_in_seconds": 1.5
+}
