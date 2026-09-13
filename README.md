@@ -1,7 +1,7 @@
 # Audiobook-Chapter-Workbench
-===============================================================================
+---
 AUDIOBOOK CHAPTER WORKBENCH — USER GUIDE
-===============================================================================
+---
 
 Audiobook Chapter Workbench is a local, offline Windows preservation tool that
 safely merges multi-part MP3 audiobooks, uses WhisperX AI to detect chapter
