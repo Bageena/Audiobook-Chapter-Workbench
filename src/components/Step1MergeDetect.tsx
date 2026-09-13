@@ -13,6 +13,8 @@ import {
 } from '../types';
 import { SourceSummary } from './SourceSummary';
 import { YouTubeAudioImport } from './YouTubeAudioImport';
+import { Step1ProgressPanel } from './Step1ProgressPanel';
+import { Step1ProcessState } from '../types';
 import {
   FolderOpen,
   FolderCheck,
@@ -36,9 +38,11 @@ import {
   ChevronDown,
   ChevronUp,
   FolderSync,
+  FolderEdit,
   Video,
   Radio,
-  FileCheck
+  FileCheck,
+  RefreshCw
 } from 'lucide-react';
 
 interface Step1Props {
@@ -156,8 +160,46 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
   const [showGpuRequiredModal, setShowGpuRequiredModal] = useState<boolean>(false);
   const [blockedModelName, setBlockedModelName] = useState<string>('');
 
+  // Step 1 Live Progress Feedback State
+  const [step1Progress, setStep1Progress] = useState<Step1ProcessState | null>(null);
+
+  // Poll live Step 1 processing progress
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    const fetchProgress = async () => {
+      try {
+        const res = await fetch('/api/step1/progress');
+        if (res.ok) {
+          const prog: Step1ProcessState = await res.json();
+          setStep1Progress(prog);
+        }
+      } catch (e) {}
+    };
+
+    fetchProgress();
+    if (isRunning) {
+      interval = setInterval(fetchProgress, 600);
+    } else {
+      interval = setInterval(fetchProgress, 2500);
+    }
+    return () => clearInterval(interval);
+  }, [isRunning]);
+
+  // Cancel Step 1 Handler
+  const handleCancelStep1 = async () => {
+    try {
+      await fetch('/api/step1/cancel', { method: 'POST' });
+      const res = await fetch('/api/step1/progress');
+      if (res.ok) {
+        setStep1Progress(await res.json());
+      }
+    } catch (e) {}
+  };
+
   // Native folder selection input ref
   const folderInputRef = useRef<HTMLInputElement>(null);
+  // Native output folder selection input ref
+  const outputFolderInputRef = useRef<HTMLInputElement>(null);
 
   // Natural sort helper for client-side sorting
   const naturalSort = <T,>(items: T[], keyFn: (item: T) => string): T[] => {
@@ -394,6 +436,49 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
   // Output Folder Handlers
   // ----------------------------------------------------
 
+  // Trigger native file explorer to choose an output folder
+  const handleOpenNativeOutputFolderPicker = async () => {
+    setOutputFolderError(null);
+
+    // 1. Try modern File System Access API if supported in browser environment
+    if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
+      try {
+        const dirHandle = await (window as any).showDirectoryPicker({
+          mode: 'readwrite',
+        });
+        if (dirHandle && dirHandle.name) {
+          await handleSetOutputFolder(dirHandle.name);
+          return;
+        }
+      } catch (err: any) {
+        // User cancelled picker dialog
+        if (err.name === 'AbortError') {
+          return;
+        }
+        // If security exception (e.g. inside cross-origin iframe sandbox), fall through to file input fallback
+      }
+    }
+
+    // 2. Fallback to native OS folder picker using file input with webkitdirectory
+    if (outputFolderInputRef.current) {
+      outputFolderInputRef.current.click();
+    }
+  };
+
+  // Handle folder chosen via native file explorer input
+  const handleNativeOutputFolderSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = event.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    // The root folder chosen by the user in file explorer
+    const chosenFolder = fileList[0]?.webkitRelativePath?.split('/')[0] || fileList[0]?.name;
+    if (chosenFolder) {
+      await handleSetOutputFolder(chosenFolder);
+    }
+    // Reset file input so selecting the same folder again triggers change event
+    event.target.value = '';
+  };
+
   const handleSetOutputFolder = async (newPath: string) => {
     setOutputFolderError(null);
     try {
@@ -490,6 +575,22 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
       }
     } catch (err) {
       console.error('Uninstall model error:', err);
+    }
+  };
+
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
+  const handleRefreshModels = async () => {
+    setIsRefreshingModels(true);
+    try {
+      const res = await fetch('/api/models/refresh', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setModels(data.models || []);
+      }
+    } catch (err) {
+      console.error('Refresh models error:', err);
+    } finally {
+      setIsRefreshingModels(false);
     }
   };
 
@@ -619,6 +720,17 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
         accept=".mp3,.m4a,.aac,.m4b,.ogg,.oga,.opus,.flac,.wav,.aiff,.aif,.wma,audio/*"
       />
 
+      {/* Hidden native output folder input (uses OS native file explorer dialog) */}
+      <input
+        type="file"
+        ref={outputFolderInputRef}
+        onChange={handleNativeOutputFolderSelected}
+        style={{ display: 'none' }}
+        // @ts-expect-error webkitdirectory is supported in Chromium/Firefox/Safari
+        webkitdirectory=""
+        directory=""
+      />
+
       {/* GPU Required Modal */}
       {showGpuRequiredModal && (
         <div
@@ -666,7 +778,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                 1
               </span>
               <h2 className="text-lg font-bold text-stone-900">
-                Staging
+                Step 1: Input and Processing Options
               </h2>
             </div>
             <p className="text-xs sm:text-sm text-stone-600 mt-1 max-w-3xl">
@@ -708,8 +820,8 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     {chapterSource === 'existing_files'
                       ? 'Import Chapters & Continue'
                       : job.status !== 'draft'
-                      ? 'Re-Run Processing'
-                      : 'Processing'}
+                      ? 'Re-run Step 1 Processing'
+                      : 'Run Step 1 Processing'}
                   </span>
                 </>
               )}
@@ -718,13 +830,25 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
         </div>
       </div>
 
+      {/* Real-time Step 1 Processing Feedback Panel */}
+      {(isRunning || (step1Progress && (step1Progress.isActive || step1Progress.summary || step1Progress.error))) && step1Progress && (
+        <Step1ProgressPanel
+          progress={{
+            ...step1Progress,
+            isActive: isRunning || step1Progress.isActive,
+          }}
+          onCancel={handleCancelStep1}
+          onDismissSummary={() => setStep1Progress(null)}
+        />
+      )}
+
       {/* SECTION 1: Import Audiobook Source */}
       <div className="bg-white rounded-xl p-5 border border-stone-200/80 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
           <div className="flex items-center space-x-2">
             <FolderOpen className="w-5 h-5 text-amber-600" />
             <div>
-              <h3 className="font-bold text-sm text-stone-900">Select Input</h3>
+              <h3 className="font-bold text-sm text-stone-900">1. Input Audio Source & Processing Options</h3>
               <p className="text-xs text-stone-500">
                 Import local audio files (.mp3, .m4a, .m4b, .flac, .ogg, .opus, .wav, .aac) or download from YouTube.
               </p>
@@ -776,7 +900,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-stone-50/80 rounded-xl border border-stone-200">
               <div>
                 <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider mb-1">
-                  Import Folder
+                  Local Audiobook Folder Selection
                 </h4>
                 <p className="text-xs text-stone-600 max-w-xl leading-relaxed">
                   Supports flat single-folder layouts (Layout A) and nested chapter subfolders (Layout B). All processing occurs strictly on your machine.
@@ -1192,18 +1316,32 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-2">
             <button
-              onClick={() => setShowOutputInput(!showOutputInput)}
+              id="btn-choose-output-folder"
+              onClick={handleOpenNativeOutputFolderPicker}
               className="px-3 py-2 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors cursor-pointer flex items-center space-x-1.5"
+              title="Open native file explorer to choose an output location"
             >
               <FolderOpen className="w-4 h-4" />
               <span>Choose Output Folder</span>
             </button>
 
             <button
+              id="btn-toggle-output-path"
+              onClick={() => setShowOutputInput(!showOutputInput)}
+              className="px-3 py-2 rounded-lg text-xs font-medium bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 transition-colors cursor-pointer flex items-center space-x-1.5"
+              title="Type or paste a custom directory path"
+            >
+              <FolderEdit className="w-3.5 h-3.5 text-stone-500" />
+              <span>{showOutputInput ? 'Hide Path Input' : 'Enter Path'}</span>
+            </button>
+
+            <button
+              id="btn-reset-default-output"
               onClick={handleResetDefaultOutput}
               className="px-3 py-2 rounded-lg text-xs font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 transition-colors cursor-pointer flex items-center space-x-1.5"
+              title="Reset output destination to default workspace directory"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset to Default</span>
@@ -1227,22 +1365,67 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
 
         {/* Optional Custom Output Path Input */}
         {showOutputInput && (
-          <div className="p-3.5 bg-stone-50 rounded-lg border border-stone-200 space-y-2 text-xs">
-            <div className="font-medium text-stone-700">Enter Local Output Directory Path:</div>
+          <div className="p-3.5 bg-stone-50 rounded-lg border border-stone-200 space-y-2.5 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-stone-700">Enter Local Output Directory Path:</span>
+              <span className="text-[11px] text-stone-500">Auto-created if it does not yet exist</span>
+            </div>
             <div className="flex items-center space-x-2">
               <input
+                id="custom-output-path-input"
                 type="text"
                 value={customOutputInput}
                 onChange={(e) => setCustomOutputInput(e.target.value)}
-                placeholder="e.g. output or /home/user/Audiobooks/output"
-                className="flex-1 px-3 py-2 bg-white border border-stone-300 rounded-md font-mono text-stone-800 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                placeholder="e.g. output or /home/user/Audiobooks/output or C:\Audiobooks\Output"
+                className="flex-1 px-3 py-2 bg-white border border-stone-300 rounded-md font-mono text-stone-800 focus:outline-hidden focus:ring-1 focus:ring-amber-500 text-xs"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && customOutputInput.trim()) {
+                    handleSetOutputFolder(customOutputInput.trim());
+                  }
+                }}
               />
               <button
+                id="btn-set-custom-output-folder"
                 onClick={() => handleSetOutputFolder(customOutputInput.trim())}
                 disabled={!customOutputInput.trim()}
-                className="px-3 py-2 bg-stone-900 text-white rounded-md font-semibold hover:bg-stone-800 disabled:opacity-50 cursor-pointer"
+                className="px-3.5 py-2 bg-stone-900 text-white rounded-md font-semibold hover:bg-stone-800 disabled:opacity-50 cursor-pointer text-xs shrink-0"
               >
                 Set Output Folder
+              </button>
+            </div>
+            <div className="flex items-center space-x-2 text-stone-500 text-[11px]">
+              <span>Quick paths:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomOutputInput('output');
+                  handleSetOutputFolder('output');
+                }}
+                className="underline hover:text-amber-800 cursor-pointer"
+              >
+                output
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomOutputInput('output/audiobooks');
+                  handleSetOutputFolder('output/audiobooks');
+                }}
+                className="underline hover:text-amber-800 cursor-pointer"
+              >
+                output/audiobooks
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomOutputInput('audiobooks/exports');
+                  handleSetOutputFolder('audiobooks/exports');
+                }}
+                className="underline hover:text-amber-800 cursor-pointer"
+              >
+                audiobooks/exports
               </button>
             </div>
           </div>
@@ -1282,13 +1465,24 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                 Disabled (No WhisperX needed)
               </span>
             ) : (
-              <button
-                onClick={handleToggleHardwareMode}
-                className="px-2.5 py-1 rounded text-[11px] font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 transition-colors cursor-pointer"
-                title="Toggle between real/simulated hardware mode for testing GPU vs CPU restriction logic"
-              >
-                Simulate: {hardware.mode === 'cpu' ? 'Switch to NVIDIA GPU' : 'Switch to CPU-only'}
-              </button>
+              <>
+                <button
+                  onClick={handleRefreshModels}
+                  disabled={isRefreshingModels}
+                  className="px-2.5 py-1 rounded text-[11px] font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 transition-colors cursor-pointer flex items-center space-x-1"
+                  title="Scan local models directory on disk for downloaded weights"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingModels ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingModels ? 'Checking Disk...' : 'Refresh Models'}</span>
+                </button>
+                <button
+                  onClick={handleToggleHardwareMode}
+                  className="px-2.5 py-1 rounded text-[11px] font-medium bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 transition-colors cursor-pointer"
+                  title="Toggle between real/simulated hardware mode for testing GPU vs CPU restriction logic"
+                >
+                  Simulate: {hardware.mode === 'cpu' ? 'Switch to NVIDIA GPU' : 'Switch to CPU-only'}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1403,6 +1597,16 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                             </span>
                             <span className="text-[11px] font-mono text-stone-500">
                               Size: {model.sizeLabel}
+                              {model.isInstalled && model.sizeOnDiskLabel && (
+                                <span className="ml-1 text-emerald-700 font-semibold">
+                                  ({model.sizeOnDiskLabel} on disk)
+                                </span>
+                              )}
+                              {model.isInstalled && model.installedFile && (
+                                <span className="ml-1 text-stone-400 block sm:inline">
+                                  • {model.installedFile}
+                                </span>
+                              )}
                             </span>
                           </div>
                         </div>
@@ -1444,17 +1648,32 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                         </div>
                       )}
 
+                      {/* Download Error Banner if any */}
+                      {model.downloadError && (
+                        <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start space-x-2">
+                          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <span className="font-semibold block text-[11px]">Download failed</span>
+                            <span className="text-[11px] text-rose-700">{model.downloadError}</span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Download Progress Bar if downloading */}
                       {model.isDownloading && (
                         <div className="space-y-1 pt-1">
                           <div className="flex justify-between text-[11px] text-amber-900 font-mono">
                             <span>Downloading weights ({model.downloadSpeed || 'Streaming'})...</span>
-                            <span className="font-bold">{model.downloadProgress || 0}%</span>
+                            <span className="font-bold">
+                              {model.downloadedBytes && model.totalBytes
+                                ? `${(model.downloadedBytes / (1024 * 1024)).toFixed(1)} / ${(model.totalBytes / (1024 * 1024)).toFixed(1)} MB (${model.downloadProgress || 0}%)`
+                                : `${model.downloadProgress || 0}%`}
+                            </span>
                           </div>
                           <div className="w-full bg-stone-200 rounded-full h-2 overflow-hidden">
                             <div
                               className="bg-amber-600 h-2 rounded-full transition-all duration-300"
-                              style={{ width: `${model.downloadProgress || 0}%` }}
+                              style={{ width: `${Math.max(2, model.downloadProgress || 0)}%` }}
                             />
                           </div>
                         </div>
@@ -1467,7 +1686,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                         {model.isInstalled ? (
                           <span className="inline-flex items-center text-emerald-700 font-semibold text-[11px]">
                             <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                            Installed
+                            Installed {model.sizeOnDiskLabel ? `(${model.sizeOnDiskLabel})` : ''}
                           </span>
                         ) : model.isDownloading ? (
                           <span className="inline-flex items-center text-amber-700 font-semibold text-[11px]">
@@ -1609,8 +1828,8 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     {chapterSource === 'existing_files'
                       ? 'Import Chapters & Continue'
                       : job.status !== 'draft'
-                      ? 'Re-Run Processing'
-                      : 'Processing'}
+                      ? 'Re-run Step 1 Processing'
+                      : 'Run Step 1 Processing'}
                   </span>
                 </>
               )}

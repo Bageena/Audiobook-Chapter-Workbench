@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AudiobookJob } from '../types';
-import { Headphones, Plus, Settings, Trash2, BookOpen, Terminal } from 'lucide-react';
+import { Headphones, Plus, Settings, Trash2, BookOpen, Terminal, Wrench, AlertCircle } from 'lucide-react';
 
 interface HeaderProps {
   jobs: AudiobookJob[];
@@ -9,6 +9,7 @@ interface HeaderProps {
   onOpenNewJob: () => void;
   onOpenSettings: () => void;
   onOpenPurge: () => void;
+  onOpenRequirements: () => void;
   onToggleLogs: () => void;
   showLogs: boolean;
 }
@@ -20,9 +21,32 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNewJob,
   onOpenSettings,
   onOpenPurge,
+  onOpenRequirements,
   onToggleLogs,
   showLogs,
 }) => {
+  const [hasRequirementsWarning, setHasRequirementsWarning] = useState<boolean>(false);
+
+  // Check requirements health on load
+  useEffect(() => {
+    let isMounted = true;
+    const checkRequirementsHealth = async () => {
+      try {
+        const res = await fetch('/api/requirements/status');
+        if (res.ok && isMounted) {
+          const data = await res.json();
+          setHasRequirementsWarning(!data.allReady);
+        }
+      } catch (e) {}
+    };
+
+    checkRequirementsHealth();
+    const timer = setInterval(checkRequirementsHealth, 10000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, []);
   return (
     <header className="bg-stone-900 text-stone-100 border-b border-stone-800 sticky top-0 z-30 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -75,8 +99,28 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* Right actions: Purge, Settings, Logs toggle */}
+        {/* Right actions: Requirements, Purge, Settings, Logs toggle */}
         <div className="flex items-center space-x-2">
+          <button
+            id="btn-open-requirements"
+            onClick={onOpenRequirements}
+            className={`flex items-center space-x-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors cursor-pointer relative ${
+              hasRequirementsWarning
+                ? 'border-amber-500 bg-amber-950/40 text-amber-300 hover:bg-amber-900/50'
+                : 'border-stone-700 text-stone-300 hover:bg-stone-800 hover:text-stone-100'
+            }`}
+            title="Check, install, repair, or update required local components."
+          >
+            <Wrench className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Requirements</span>
+            {hasRequirementsWarning && (
+              <span className="flex h-2 w-2 relative -mr-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+              </span>
+            )}
+          </button>
+
           <button
             id="btn-open-purge"
             onClick={onOpenPurge}

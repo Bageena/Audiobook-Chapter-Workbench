@@ -152,6 +152,12 @@ export interface SpeechModelInfo {
   isDownloading?: boolean;
   downloadProgress?: number; // 0 to 100
   downloadSpeed?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  sizeOnDiskBytes?: number;
+  sizeOnDiskLabel?: string;
+  installedFile?: string;
+  downloadError?: string;
   description: string;
 }
 
@@ -309,4 +315,112 @@ export interface AudiobookJob {
 
   validation?: ValidationReport | null;
   logs: JobLog[];
+}
+
+// ----------------------------------------------------
+// Requirements & Base Components Types
+// ----------------------------------------------------
+export type ComponentStatus =
+  | 'ready'
+  | 'update_available'
+  | 'missing'
+  | 'broken'
+  | 'checking'
+  | 'installing'
+  | 'updating'
+  | 'repairing'
+  | 'error';
+
+export type ComponentClassification = 'required' | 'optional';
+
+export interface BaseRequirementItem {
+  id: string;
+  name: string;
+  purpose: string;
+  classification: ComponentClassification;
+  status: ComponentStatus;
+  installedVersion?: string;
+  availableVersion?: string;
+  updateAvailable?: boolean;
+  installLocation?: string;
+  isAppManaged: boolean;
+  error?: string;
+  diagnosticDetails?: string;
+}
+
+export interface HardwareEnvironmentInfo {
+  os: string;
+  platform: string;
+  arch: string;
+  cpuModel: string;
+  hasNvidiaGpu: boolean;
+  gpuName?: string;
+  vramGb?: number;
+  cudaVersion?: string;
+  mode: 'gpu' | 'cpu';
+  recommendedPyTorchFlavor: 'cuda' | 'cpu';
+  recommendationSummary: string;
+}
+
+export interface RequirementsReport {
+  timestamp: string;
+  allReady: boolean;
+  needsAttentionCount: number;
+  summaryMessage: string;
+  hardware: HardwareEnvironmentInfo;
+  components: BaseRequirementItem[];
+  availableUpdatesCount: number;
+}
+
+export interface InstallRepairProgress {
+  isActive: boolean;
+  phase: 'idle' | 'preparing' | 'in_progress' | 'verifying' | 'completed' | 'cancelled' | 'error';
+  currentActivity: string;
+  overallProgress: number; // 0 - 100
+  currentItemId?: string;
+  logs: string[];
+  canCancel: boolean;
+  error?: string;
+  successMessage?: string;
+}
+
+// ----------------------------------------------------
+// Step 1 Processing Progress & Feedback Types
+// ----------------------------------------------------
+export type Step1ProcessStage =
+  | 'idle'
+  | 'initializing'
+  | 'scanning_folder'
+  | 'probing_media'
+  | 'downloading_youtube'
+  | 'merging_audio'
+  | 'normalizing_pcm'
+  | 'loading_model'
+  | 'transcribing_whisper'
+  | 'aligning_timestamps'
+  | 'extracting_chapters'
+  | 'saving_project'
+  | 'completed'
+  | 'cancelled'
+  | 'error';
+
+export interface Step1ProcessState {
+  isActive: boolean;
+  stage: Step1ProcessStage;
+  label: string; // e.g. "Processing audiobook source…"
+  currentTask: string;
+  currentStageNumber: number;
+  totalStages: number;
+  currentCount?: number;
+  totalCount?: number;
+  percentage: number; // 0 - 100
+  isDeterminate: boolean;
+  elapsedSeconds: number;
+  estimatedRemainingSeconds?: number | null;
+  liveStatusMessage: string;
+  logs: string[];
+  canCancel: boolean;
+  isCancelling?: boolean;
+  error?: string | null;
+  summary?: string | null;
 }

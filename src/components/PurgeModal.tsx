@@ -143,10 +143,22 @@ export const PurgeModal: React.FC<PurgeModalProps> = ({ job, onClose, onPurge })
           </div>
         )}
 
-        {/* Preservation Guarantee */}
-        <p className="text-[11px] text-stone-500 italic">
-          * Your generated .m4b files in Output/ and CSV files are never deleted by the purge tool.
-        </p>
+        {/* Explicit Safety Guarantees Callout */}
+        <div className="p-3 bg-stone-50 border border-stone-200 rounded-lg space-y-1.5 text-[11px] text-stone-600">
+          <div className="flex items-center space-x-1.5 font-semibold text-stone-800">
+            <Check className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Strict Retention Guarantees</span>
+          </div>
+          <p className="leading-relaxed">
+            Purging <strong>only</strong> removes temporary/intermediate working files. Purge will <strong>never</strong> delete:
+          </p>
+          <ul className="list-disc list-inside space-y-0.5 text-stone-500 pl-1">
+            <li>Saved projects, metadata, cover art, transcripts, or chapter edits</li>
+            <li>Finished audiobook packages (.m4b) or cue files in Output</li>
+            <li>Installed Whisper models or yt-dlp executables</li>
+            <li>Local application dependencies managed by the Requirements panel</li>
+          </ul>
+        </div>
 
         <div className="flex justify-end space-x-2 pt-2">
           <button
