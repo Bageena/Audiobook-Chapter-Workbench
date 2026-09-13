@@ -1,5 +1,5 @@
 # Audiobook Workbench
-
+Want to support the project? Find me on (Pateron)[https://patreon.com/Bageena?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink]
 > **Status: Work in Progress**
 >
 > Audiobook Workbench is still under active development, testing, and refinement. It is not currently recommended for general installation or production use.
