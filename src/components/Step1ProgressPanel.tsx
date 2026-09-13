@@ -222,7 +222,16 @@ export const Step1ProgressPanel: React.FC<Step1ProgressPanelProps> = ({
             <span>Processing Summary</span>
           </div>
           <div className="text-[11px] bg-white/70 p-2.5 rounded border border-emerald-100 text-stone-800 leading-relaxed font-mono">
-            {progress.summary}
+            {typeof progress.summary === 'object' ? (
+              <div className="space-y-1">
+                <div>Total Files: {progress.summary.totalFilesProcessed}</div>
+                <div>Chapters Found: {progress.summary.chaptersFound}</div>
+                <div>Model Used: {progress.summary.modelUsed}</div>
+                <div>Words Transcribed: {progress.summary.wordsTranscribed}</div>
+              </div>
+            ) : (
+              progress.summary
+            )}
           </div>
         </div>
       )}

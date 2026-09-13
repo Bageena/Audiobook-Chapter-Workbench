@@ -422,5 +422,5 @@ export interface Step1ProcessState {
   canCancel: boolean;
   isCancelling?: boolean;
   error?: string | null;
-  summary?: string | null;
+  summary?: any | null;
 }
