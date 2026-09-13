@@ -666,7 +666,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                 1
               </span>
               <h2 className="text-lg font-bold text-stone-900">
-                Step 1: Input and Processing Options
+                Staging
               </h2>
             </div>
             <p className="text-xs sm:text-sm text-stone-600 mt-1 max-w-3xl">
@@ -708,8 +708,8 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     {chapterSource === 'existing_files'
                       ? 'Import Chapters & Continue'
                       : job.status !== 'draft'
-                      ? 'Re-run Step 1 Processing'
-                      : 'Run Step 1 Processing'}
+                      ? 'Re-Run Processing'
+                      : 'Processing'}
                   </span>
                 </>
               )}
@@ -724,7 +724,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
           <div className="flex items-center space-x-2">
             <FolderOpen className="w-5 h-5 text-amber-600" />
             <div>
-              <h3 className="font-bold text-sm text-stone-900">1. Input Audio Source & Processing Options</h3>
+              <h3 className="font-bold text-sm text-stone-900">Select Input</h3>
               <p className="text-xs text-stone-500">
                 Import local audio files (.mp3, .m4a, .m4b, .flac, .ogg, .opus, .wav, .aac) or download from YouTube.
               </p>
@@ -776,7 +776,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-stone-50/80 rounded-xl border border-stone-200">
               <div>
                 <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider mb-1">
-                  Local Audiobook Folder Selection
+                  Import Folder
                 </h4>
                 <p className="text-xs text-stone-600 max-w-xl leading-relaxed">
                   Supports flat single-folder layouts (Layout A) and nested chapter subfolders (Layout B). All processing occurs strictly on your machine.
@@ -1609,8 +1609,8 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     {chapterSource === 'existing_files'
                       ? 'Import Chapters & Continue'
                       : job.status !== 'draft'
-                      ? 'Re-run Step 1 Processing'
-                      : 'Run Step 1 Processing'}
+                      ? 'Re-Run Processing'
+                      : 'Processing'}
                   </span>
                 </>
               )}
