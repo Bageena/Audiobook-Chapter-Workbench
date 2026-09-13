@@ -14,7 +14,7 @@
 
 Built with **Node.js**, it provides a browser-based interface while processing files locally on your own computer. It is primarily intended for Windows, though Docker support may be possible depending on the configuration and installation files included with the project.
 
-Audiobook Workbench began as a collection of practical Windows batch-file workflows for audiobook conversion, merging, chaptering, and metadata work. Those batch files became the functional foundation of the project. With assistance from Gemini, the workflows were translated and expanded into a Node.js web application with a browser-based interface.
+Audiobook Workbench began as a collection of practical Windows batch-file workflows for audiobook conversion, merging, chaptering, and metadata work. Those batch files became the functional foundation of the project. With assistance from AI, the workflows were translated and expanded into a Node.js web application with a browser-based interface.
 
 Original source audio files are never intentionally modified, and the application does not automatically delete files.
 
