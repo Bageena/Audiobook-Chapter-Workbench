@@ -329,11 +329,11 @@ export default function App() {
               {/* 5 Step Pipeline Navigation Tabs */}
               <nav aria-label="Workbench Steps" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                 {[
-                  { step: 1, label: '1. Merge & Detect', desc: 'Decode PCM & transcribe' },
-                  { step: 2, label: '2. Review Chapters', desc: 'Audit candidates & edit CSV' },
-                  { step: 3, label: '3. Metadata & Cover', desc: 'Audiobookshelf tags & cover art' },
-                  { step: 4, label: '4. Build M4B', desc: 'Compile FFmetadata & AAC audio' },
-                  { step: 5, label: '5. Validate Output', desc: 'FFprobe container check' },
+                  { step: 1, label: '1. Staging', desc: 'Import and Workflow' },
+                  { step: 2, label: '2. Build Chapters', desc: 'Audit and Edit Chapters' },
+                  { step: 3, label: '3. Metadata', desc: 'Edit Metadata & Artwork' },
+                  { step: 4, label: '4. M4B Convert', desc: 'Compile FFmetadata & encode AAC audio' },
+                  { step: 5, label: '5. Validate', desc: 'FFprobe container check & playback review' },
                 ].map((item) => {
                   const isActive = activeStep === item.step;
                   const isCompleted =

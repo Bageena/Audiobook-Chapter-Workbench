@@ -240,7 +240,7 @@ export const Step1ProgressPanel: React.FC<Step1ProgressPanelProps> = ({
           </button>
 
           {showLogs && (
-            <div className="bg-stone-900 text-stone-200 p-3 rounded-lg font-mono text-[11px] max-h-36 overflow-y-auto space-y-0.5 border border-stone-800 shadow-inner">
+            <div className="bg-stone-100 text-stone-800 p-3 rounded-lg font-mono text-[11px] max-h-36 overflow-y-auto space-y-0.5 border border-stone-200 shadow-inner">
               {progress.logs.map((logLine, idx) => (
                 <div key={idx} className="leading-relaxed">
                   {logLine}

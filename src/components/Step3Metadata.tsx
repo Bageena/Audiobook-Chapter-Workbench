@@ -110,6 +110,43 @@ export const Step3Metadata: React.FC<Step3MetadataProps> = ({
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [tagInput, setTagInput] = useState<string>('');
   const [tagFilter, setTagFilter] = useState<string>('');
+  const [authorInput, setAuthorInput] = useState<string>('');
+  const [narratorInput, setNarratorInput] = useState<string>('');
+
+  const authorsList = formData.author ? formData.author.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const narratorsList = formData.narrator ? formData.narrator.split(',').map((s) => s.trim()).filter(Boolean) : [];
+
+  const handleAddAuthor = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const current = authorsList;
+    if (!current.includes(trimmed)) {
+      const updated = [...current, trimmed].join(', ');
+      setFormData((prev) => ({ ...prev, author: updated }));
+    }
+    setAuthorInput('');
+  };
+
+  const handleRemoveAuthor = (name: string) => {
+    const updated = authorsList.filter((a) => a !== name).join(', ');
+    setFormData((prev) => ({ ...prev, author: updated }));
+  };
+
+  const handleAddNarrator = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const current = narratorsList;
+    if (!current.includes(trimmed)) {
+      const updated = [...current, trimmed].join(', ');
+      setFormData((prev) => ({ ...prev, narrator: updated }));
+    }
+    setNarratorInput('');
+  };
+
+  const handleRemoveNarrator = (name: string) => {
+    const updated = narratorsList.filter((n) => n !== name).join(', ');
+    setFormData((prev) => ({ ...prev, narrator: updated }));
+  };
 
   // Keep synced if job changes
   useEffect(() => {
@@ -336,7 +373,7 @@ export const Step3Metadata: React.FC<Step3MetadataProps> = ({
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center space-x-2">
                 <Image className="w-4 h-4 text-amber-700" />
-                <h3 className="font-bold text-sm text-stone-900">Audiobook Cover Art</h3>
+                <h3 className="font-bold text-sm text-stone-900">Cover</h3>
               </div>
               {formData.cover && (
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -529,7 +566,7 @@ export const Step3Metadata: React.FC<Step3MetadataProps> = ({
               <div className="flex items-center space-x-2 border-b border-stone-100 pb-3">
                 <BookOpen className="w-4 h-4 text-amber-700" />
                 <h3 className="font-bold text-sm text-stone-900">
-                  Audiobook Identification
+                  Title and Author
                 </h3>
               </div>
 
@@ -582,18 +619,58 @@ export const Step3Metadata: React.FC<Step3MetadataProps> = ({
                     className="flex items-center space-x-1.5 text-xs font-bold text-stone-700 mb-1"
                   >
                     <User className="w-3.5 h-3.5 text-stone-400" />
-                    <span>Author(s) (Artist Tag)</span>
+                    <span>Author(s)</span>
                   </label>
-                  <input
-                    id="meta-author"
-                    type="text"
-                    value={formData.author}
-                    onChange={(e) =>
-                      setFormData((prev) => ({ ...prev, author: e.target.value }))
-                    }
-                    placeholder="e.g. Frank Herbert"
-                    className="w-full bg-stone-50/50 border border-stone-300 rounded-lg px-3 py-2 text-xs text-stone-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  />
+                  <div className="flex flex-wrap items-center gap-1.5 min-h-[38px] p-2 bg-stone-50/50 border border-stone-300 rounded-lg focus-within:ring-1 focus-within:ring-amber-500 focus-within:border-amber-500">
+                    {authorsList.map((authorName) => (
+                      <span
+                        key={authorName}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs"
+                        title="Author credit"
+                      >
+                        <User className="w-3 h-3 text-amber-700 shrink-0" />
+                        <span>{authorName}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAuthor(authorName)}
+                          className="text-amber-700 hover:text-rose-700 cursor-pointer ml-0.5 text-xs font-bold"
+                          title={`Remove ${authorName}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      id="meta-author"
+                      type="text"
+                      value={authorInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.includes(',')) {
+                          const parts = val.split(',');
+                          parts.slice(0, -1).forEach((part) => handleAddAuthor(part));
+                          setAuthorInput(parts[parts.length - 1]);
+                        } else {
+                          setAuthorInput(val);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddAuthor(authorInput);
+                        } else if (e.key === 'Backspace' && !authorInput && authorsList.length > 0) {
+                          handleRemoveAuthor(authorsList[authorsList.length - 1]);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (authorInput.trim()) {
+                          handleAddAuthor(authorInput);
+                        }
+                      }}
+                      placeholder={authorsList.length === 0 ? "Type author name and press Enter or comma..." : "Add another author..."}
+                      className="flex-1 min-w-[140px] bg-transparent border-none text-xs text-stone-900 focus:outline-none placeholder:text-stone-400"
+                    />
+                  </div>
                 </div>
 
                 {/* Narrator(s) - HIGHLIGHTED: Mapped to Composer Tag! */}
@@ -610,20 +687,61 @@ export const Step3Metadata: React.FC<Step3MetadataProps> = ({
                       Mapped to Composer
                     </span>
                   </label>
-                  <input
-                    id="meta-narrator"
-                    type="text"
-                    value={formData.narrator}
-                    onChange={(e) =>
-                      setFormData((prev) => ({ ...prev, narrator: e.target.value }))
-                    }
-                    placeholder="e.g. Scott Brick, Orson Scott Card"
-                    className="w-full bg-stone-50/50 border border-amber-300/80 rounded-lg px-3 py-2 text-xs text-stone-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  />
-                  <p className="text-[10px] text-stone-400 mt-1">
-                    Standard Audiobookshelf & iTunes M4B field: Stored in the MP4{' '}
-                    <code className="text-amber-800 font-mono">composer (\xa9wrt)</code> atom.
-                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5 min-h-[38px] p-2 bg-stone-50/50 border border-amber-300/80 rounded-lg focus-within:ring-1 focus-within:ring-amber-500 focus-within:border-amber-500">
+                    {narratorsList.map((narratorName) => (
+                      <span
+                        key={narratorName}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs"
+                        title="Narrator credit"
+                      >
+                        <Mic className="w-3 h-3 text-amber-700 shrink-0" />
+                        <span>{narratorName}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveNarrator(narratorName)}
+                          className="text-amber-700 hover:text-rose-700 cursor-pointer ml-0.5 text-xs font-bold"
+                          title={`Remove ${narratorName}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      id="meta-narrator"
+                      type="text"
+                      value={narratorInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.includes(',')) {
+                          const parts = val.split(',');
+                          parts.slice(0, -1).forEach((part) => handleAddNarrator(part));
+                          setNarratorInput(parts[parts.length - 1]);
+                        } else {
+                          setNarratorInput(val);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddNarrator(narratorInput);
+                        } else if (e.key === 'Backspace' && !narratorInput && narratorsList.length > 0) {
+                          handleRemoveNarrator(narratorsList[narratorsList.length - 1]);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (narratorInput.trim()) {
+                          handleAddNarrator(narratorInput);
+                        }
+                      }}
+                      placeholder={narratorsList.length === 0 ? "Type narrator name and press Enter or comma..." : "Add another narrator..."}
+                      className="flex-1 min-w-[140px] bg-transparent border-none text-xs text-stone-900 focus:outline-none placeholder:text-stone-400"
+                    />
+                  </div>
+
+                  <div className="pt-1 flex items-center text-[11px] text-stone-500">
+                    <span>💡 Tip: Type a name and press <kbd className="px-1 py-0.5 bg-stone-100 border border-stone-200 rounded text-[10px] font-mono font-semibold text-stone-700">Enter</kbd> or type a comma <code className="px-1 py-0.5 bg-stone-100 border border-stone-200 rounded text-[10px] font-mono text-stone-700">,</code> to add multiple authors or narrators.</span>
+                  </div>
+
                 </div>
               </div>
             </div>

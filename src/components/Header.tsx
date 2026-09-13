@@ -100,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right actions: Requirements, Purge, Settings, Logs toggle */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 ml-4 sm:ml-6">
           <button
             id="btn-open-requirements"
             onClick={onOpenRequirements}

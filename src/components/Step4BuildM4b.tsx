@@ -160,7 +160,7 @@ export const Step4BuildM4b: React.FC<Step4Props> = ({
               </a>
             </div>
 
-            <div className="flex-1 bg-stone-900 p-4 overflow-y-auto text-xs font-mono text-stone-300">
+            <div className="flex-1 bg-stone-100 border border-stone-200 rounded-lg p-4 overflow-y-auto text-xs font-mono text-stone-800">
               <pre className="whitespace-pre-wrap leading-relaxed">
                 {job.ffmetaContent ||
                   `;FFMETADATA1\ngenre=Audiobook\n` +

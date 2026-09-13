@@ -700,7 +700,7 @@ export const Step2ChapterReview: React.FC<Step2Props> = ({
             {/* Validation Rule Hints */}
             <div className="px-4 py-2 bg-amber-50/60 border-b border-amber-100 text-[11px] text-amber-900 flex items-center justify-between">
               <span>
-                Validation rules: Timestamps must strictly increase. Chapter 1 can start at or after <strong>00:00:00.000</strong> to trim dead air.
+                Validation rules: Timestamps must strictly increase.
               </span>
               <span className="font-mono text-stone-500">Lead-in: {leadInSeconds}s</span>
             </div>

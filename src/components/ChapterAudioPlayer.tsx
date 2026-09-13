@@ -312,7 +312,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
   }
 
   return (
-    <div className="bg-stone-900 text-stone-100 rounded-xl p-4 shadow-md border border-stone-800 space-y-3">
+    <div className="bg-white text-stone-900 rounded-xl p-4 shadow-md border border-stone-200 space-y-3">
       {/* Hidden Audio Element for actual files */}
       {audioUrl && (
         <audio
@@ -325,13 +325,13 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
       )}
 
       {/* Track Header & Mode Badges */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-800 pb-2.5 text-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-2.5 text-xs">
         <div className="flex items-center space-x-3">
           <div
             className={`w-8 h-8 rounded-lg flex items-center justify-center ${
               isPlaying
                 ? 'bg-amber-500 text-stone-950 animate-pulse'
-                : 'bg-stone-800 text-stone-300'
+                : 'bg-stone-100 text-stone-700'
             }`}
           >
             <Volume2 className="w-4 h-4" />
@@ -339,14 +339,14 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
 
           <div>
             <div className="flex items-center space-x-2">
-              <span className="font-bold text-amber-400 text-sm tracking-tight">
+              <span className="font-bold text-stone-900 text-sm tracking-tight">
                 {activeTrack.title}
               </span>
-              <span className="font-mono bg-stone-800 text-stone-300 px-1.5 py-0.5 rounded text-[11px] font-semibold border border-stone-700">
+              <span className="font-mono bg-stone-100 text-stone-700 px-1.5 py-0.5 rounded text-[11px] font-semibold border border-stone-200">
                 {activeTrack.start}
               </span>
             </div>
-            <p className="text-[11px] text-stone-400 mt-0.5">
+            <p className="text-[11px] text-stone-500 mt-0.5">
               {activeTrack.sourceType === 'candidate' ? 'Detected Candidate Mark' : 'Active Chapter Track'}
             </p>
           </div>
@@ -355,21 +355,21 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
         {/* Playback Mode Controls */}
         <div className="flex items-center space-x-2 text-xs">
           {audioFile ? (
-            <div className="flex items-center space-x-1.5 bg-emerald-950/80 text-emerald-400 px-2.5 py-1 rounded border border-emerald-800 text-[11px]">
+            <div className="flex items-center space-x-1.5 bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded border border-emerald-200 text-[11px]">
               <FileAudio className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate max-w-[140px]" title={audioFile.name}>
                 {audioFile.name}
               </span>
               <button
                 onClick={() => setUseSynthesizer(!useSynthesizer)}
-                className="ml-1 text-[10px] underline text-stone-400 hover:text-white cursor-pointer"
+                className="ml-1 text-[10px] underline text-stone-500 hover:text-stone-900 cursor-pointer"
               >
                 {useSynthesizer ? 'Switch to MP3' : 'Switch to Voice'}
               </button>
             </div>
           ) : (
-            <div className="flex items-center space-x-1.5 bg-stone-800/90 text-amber-300 px-2.5 py-1 rounded border border-stone-700 text-[11px]">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <div className="flex items-center space-x-1.5 bg-amber-50 text-amber-900 px-2.5 py-1 rounded border border-amber-200 text-[11px]">
+              <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
               <span>Narrator Speech & Chime</span>
             </div>
           )}
@@ -383,33 +383,33 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center space-x-1 px-2 py-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 text-[11px] border border-stone-700 cursor-pointer"
+            className="flex items-center space-x-1 px-2 py-1 rounded bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] border border-stone-200 cursor-pointer"
             title="Upload actual audiobook MP3 to listen directly to the narrator"
           >
-            <Upload className="w-3 h-3 text-stone-400" />
+            <Upload className="w-3 h-3 text-stone-500" />
             <span>{audioFile ? 'Change MP3' : 'Use MP3 File'}</span>
           </button>
         </div>
       </div>
 
       {/* Interactive Transcribe / Word Alignment Section (Click any word to update timestamp) */}
-      <div className="bg-stone-950/90 rounded-lg p-3 border border-stone-800 text-xs space-y-2">
-        <div className="flex items-center justify-between text-[11px] text-stone-400 border-b border-stone-800/80 pb-1.5">
-          <div className="flex items-center space-x-1.5 text-amber-400 font-semibold">
-            <Sparkles className="w-3.5 h-3.5" />
+      <div className="bg-stone-50 rounded-lg p-3 border border-stone-200 text-xs space-y-2">
+        <div className="flex items-center justify-between text-[11px] text-stone-500 border-b border-stone-200 pb-1.5">
+          <div className="flex items-center space-x-1.5 text-stone-900 font-semibold">
+            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
             <span>Interactive Transcription Window</span>
           </div>
 
           <div className="flex items-center space-x-2">
             {lastClickedWord && (
-              <span className="text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800 flex items-center space-x-1 text-[10px] animate-fadeIn">
-                <CheckCircle2 className="w-3 h-3" />
+              <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center space-x-1 text-[10px] animate-fadeIn">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                 <span>
                   Snapped to <strong>"{lastClickedWord.word}"</strong> ({lastClickedWord.timestamp})
                 </span>
               </span>
             )}
-            <span className="text-stone-400 text-[10px] hidden sm:inline">
+            <span className="text-stone-500 text-[10px] hidden sm:inline">
               👆 Click any word to snap chapter start to that timestamp
             </span>
           </div>
@@ -430,17 +430,17 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
                   onClick={() => handleWordClicked(w)}
                   className={`group relative inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-sans transition-all cursor-pointer ${
                     isSelectedWord
-                      ? 'bg-emerald-500 text-stone-950 font-bold ring-2 ring-emerald-300 scale-105 shadow-xs'
+                      ? 'bg-amber-500 text-stone-950 font-bold ring-2 ring-amber-300 scale-105 shadow-xs'
                       : isMatchedWord
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-400 hover:text-stone-950 font-medium'
-                      : 'bg-stone-800/80 text-stone-300 hover:bg-stone-700 hover:text-white border border-transparent'
+                      ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 font-medium'
+                      : 'bg-white text-stone-700 hover:bg-stone-200 hover:text-stone-900 border border-stone-200'
                   }`}
                   title={`Click to set timestamp to ${w.start}`}
                 >
                   <span>{w.word}</span>
 
                   {/* Micro timestamp popup on hover */}
-                  <span className="absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:flex items-center space-x-1 bg-stone-950 text-amber-300 text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg border border-stone-700 whitespace-nowrap z-20 pointer-events-none">
+                  <span className="absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:flex items-center space-x-1 bg-stone-900 text-amber-300 text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg border border-stone-700 whitespace-nowrap z-20 pointer-events-none">
                     <Clock className="w-2.5 h-2.5" />
                     <span>{w.start}</span>
                   </span>
@@ -462,7 +462,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
           <button
             id="btn-player-seek-back"
             onClick={() => handleSeekOffset(-5)}
-            className="p-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 cursor-pointer transition-colors"
+            className="p-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 cursor-pointer transition-colors"
             title="Rewind 5 seconds"
           >
             <RotateCcw className="w-4 h-4" />
@@ -493,7 +493,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
           <button
             id="btn-player-seek-fwd"
             onClick={() => handleSeekOffset(5)}
-            className="p-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 cursor-pointer transition-colors"
+            className="p-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 cursor-pointer transition-colors"
             title="Forward 5 seconds"
           >
             <RotateCw className="w-4 h-4" />
@@ -502,7 +502,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
           <button
             id="btn-player-stop"
             onClick={onStop}
-            className="p-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-red-400 cursor-pointer transition-colors"
+            className="p-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-red-600 cursor-pointer transition-colors"
             title="Stop & Dismiss Player"
           >
             <Square className="w-4 h-4" />
@@ -511,7 +511,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
 
         {/* Timestamp Scrubber & Display */}
         <div className="flex-1 flex items-center space-x-3 px-2">
-          <span className="font-mono text-xs text-amber-400 font-medium">
+          <span className="font-mono text-xs text-amber-700 font-semibold">
             {formatSec(currentTime)}
           </span>
 
@@ -529,7 +529,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
                   audioRef.current.currentTime = val;
                 }
               }}
-              className="w-full h-1.5 bg-stone-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              className="w-full h-1.5 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-amber-600"
             />
           </div>
 
@@ -542,7 +542,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
         <div className="flex items-center space-x-2">
           <button
             onClick={() => setIsMuted(!isMuted)}
-            className="p-1 text-stone-400 hover:text-stone-200 cursor-pointer"
+            className="p-1 text-stone-500 hover:text-stone-800 cursor-pointer"
             title={isMuted ? 'Unmute' : 'Mute'}
           >
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -559,7 +559,7 @@ export const ChapterAudioPlayer: React.FC<ChapterAudioPlayerProps> = ({
               setIsMuted(false);
               if (audioRef.current) audioRef.current.volume = val;
             }}
-            className="w-16 h-1.5 bg-stone-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+            className="w-16 h-1.5 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-amber-600"
             title="Volume"
           />
         </div>

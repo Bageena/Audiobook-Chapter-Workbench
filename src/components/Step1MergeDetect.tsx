@@ -778,12 +778,11 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                 1
               </span>
               <h2 className="text-lg font-bold text-stone-900">
-                Step 1: Input and Processing Options
+                Import & Setup
               </h2>
             </div>
             <p className="text-xs sm:text-sm text-stone-600 mt-1 max-w-3xl">
-              Local desktop processing workbench. Select your audiobook folder, choose your chapter
-              source workflow, configure speech models, and set the local output destination.
+              Import your audio files or folder, choose how you want chapters handled, and get ready to create your audiobook.
             </p>
           </div>
 
@@ -820,8 +819,8 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     {chapterSource === 'existing_files'
                       ? 'Import Chapters & Continue'
                       : job.status !== 'draft'
-                      ? 'Re-run Step 1 Processing'
-                      : 'Run Step 1 Processing'}
+                      ? 'Re-Run Processing'
+                      : 'Processing'}
                   </span>
                 </>
               )}
@@ -848,7 +847,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
           <div className="flex items-center space-x-2">
             <FolderOpen className="w-5 h-5 text-amber-600" />
             <div>
-              <h3 className="font-bold text-sm text-stone-900">1. Input Audio Source & Processing Options</h3>
+              <h3 className="font-bold text-sm text-stone-900">Select Input</h3>
               <p className="text-xs text-stone-500">
                 Import local audio files (.mp3, .m4a, .m4b, .flac, .ogg, .opus, .wav, .aac) or download from YouTube.
               </p>
@@ -900,10 +899,10 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-stone-50/80 rounded-xl border border-stone-200">
               <div>
                 <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider mb-1">
-                  Local Audiobook Folder Selection
+                  Import Folder
                 </h4>
                 <p className="text-xs text-stone-600 max-w-xl leading-relaxed">
-                  Supports flat single-folder layouts (Layout A) and nested chapter subfolders (Layout B). All processing occurs strictly on your machine.
+                  Select an audiobook folder containing your audio files. All processing occurs securely on your machine.
                 </p>
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {['MP3', 'M4A', 'M4B', 'FLAC', 'OGG', 'OPUS', 'WAV', 'AAC', 'AIFF', 'WMA'].map((fmt) => (
@@ -957,7 +956,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                   </button>
                 </div>
                 <div className="flex items-center space-x-2 text-stone-500 text-[11px]">
-                  <span>Sample local layouts:</span>
+                  <span>Sample folders:</span>
                   <button
                     onClick={() => {
                       setCustomPathInput('audiobooks/Dune');
@@ -965,7 +964,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     }}
                     className="underline hover:text-amber-800 cursor-pointer"
                   >
-                    audiobooks/Dune (Layout A)
+                    audiobooks/Dune
                   </button>
                   <span>•</span>
                   <button
@@ -975,7 +974,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     }}
                     className="underline hover:text-amber-800 cursor-pointer"
                   >
-                    audiobooks/Project_Hail_Mary/Chapters (Layout B)
+                    audiobooks/Project_Hail_Mary/Chapters
                   </button>
                 </div>
               </div>
@@ -1075,7 +1074,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
         <div className="flex items-center space-x-2 border-b border-stone-100 pb-3">
           <Sliders className="w-5 h-5 text-amber-600" />
           <div>
-            <h3 className="font-bold text-sm text-stone-900">2. Chapter Source Selection</h3>
+            <h3 className="font-bold text-sm text-stone-900">Chapter Workflow</h3>
             <p className="text-xs text-stone-500">
               Choose how chapter markers are derived for your audiobook.
             </p>
@@ -1106,7 +1105,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     className="w-4 h-4 text-amber-600 focus:ring-amber-500"
                   />
                   <span className="font-bold text-sm text-stone-900">
-                    Generate chapters with WhisperX
+                    Generate Chapters with AI
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px] font-semibold">
@@ -1114,9 +1113,11 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                 </span>
               </div>
               <p className="text-xs text-stone-600 pl-6 leading-relaxed">
-                Stitches audio and runs local WhisperX speech recognition with Wav2Vec2 alignment to
-                automatically detect chapter headings and timestamp boundaries.
+                Stitches audio and uses WhisperX to automatically detect chapters.
               </p>
+              <div className="pl-6 pt-1 text-[11px] text-amber-800 italic">
+                &ldquo;Use when MP3s are not cleanly cut into chapters.&rdquo;
+              </div>
             </div>
           </label>
 
@@ -1143,16 +1144,15 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     className="w-4 h-4 text-amber-600 focus:ring-amber-500"
                   />
                   <span className="font-bold text-sm text-stone-900">
-                    Use imported audio files as individual chapters
+                    Use Audio Files as Chapters
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded bg-stone-200 text-stone-700 text-[11px] font-semibold">
-                  No WhisperX
+                  Instant
                 </span>
               </div>
               <p className="text-xs text-stone-600 pl-6 leading-relaxed">
-                Treats each discovered audio file as an individual chapter, preserving natural file
-                ordering and durations without running AI speech recognition.
+                Use each audio file as its own chapter. Ideal when your MP3s are already split per chapter.
               </p>
               <div className="pl-6 pt-1 text-[11px] text-amber-800 italic">
                 &ldquo;Use this when your audiobook already consists of clean, correctly separated chapter files.&rdquo;
@@ -1174,22 +1174,22 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
           <div className="flex items-center space-x-2">
             <Layers className="w-5 h-5 text-amber-600" />
             <div>
-              <h3 className="font-bold text-sm text-stone-900">3. Audio Merge Method</h3>
+              <h3 className="font-bold text-sm text-stone-900">Audio Workflow</h3>
               <p className="text-xs text-stone-500">
-                Choose how source audio parts are concatenated prior to WhisperX chapter extraction.
+                Choose how audio files are combined before AI chapter detection.
               </p>
             </div>
           </div>
           {chapterSource === 'existing_files' && (
             <span className="text-xs font-semibold px-2.5 py-1 rounded bg-stone-200 text-stone-600">
-              Bypassed (Individual files map directly to chapters)
+              Bypassed (Using files as chapters)
             </span>
           )}
         </div>
 
         {chapterSource === 'existing_files' ? (
           <div className="p-3 bg-stone-100/70 rounded-lg text-xs text-stone-600 leading-relaxed">
-            Audio merge and transcription are bypassed. Discovered audio files will each serve as an individual chapter and will be assembled directly during the final audio build step.
+            Audio merging and transcription are bypassed. Each audio file serves directly as an individual chapter.
           </div>
         ) : (
           <div className="space-y-3 pt-1">
@@ -1217,16 +1217,15 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                         className="w-4 h-4 text-amber-600 focus:ring-amber-500"
                       />
                       <span className="font-bold text-sm text-stone-900">
-                        Standard merge (recommended)
+                        Standard Merge (Recommended)
                       </span>
                     </div>
                     <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-semibold">
-                      Reliable Timing
+                      Most Reliable
                     </span>
                   </div>
                   <p className="text-xs text-stone-600 pl-6 leading-relaxed">
-                    Decodes source audio to standardized raw PCM (44.1kHz s16le stereo) before merging.
-                    Safest method for reliable timing, eliminating PTS drift, encoder gaps, and codec mismatches.
+                    Standardizes audio first for the most accurate timing and best AI chapter detection results.
                   </p>
                 </div>
               </label>
@@ -1259,22 +1258,21 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                         className="w-4 h-4 text-amber-600 focus:ring-amber-500 disabled:opacity-40"
                       />
                       <span className="font-bold text-sm text-stone-900">
-                        Quick Merge — stitch audio files directly
+                        Fast Merge
                       </span>
                     </div>
                     {!streamCopyCompatible ? (
                       <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-semibold">
-                        Disabled (Mixed Codecs)
+                        Not Available (Mixed Codecs)
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px] font-semibold">
-                        Fast Concat
+                        Instant
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-stone-600 pl-6 leading-relaxed">
-                    Stitches audio bitstreams directly without decoding to PCM first, then runs WhisperX.
-                    Requires matching container, codec, and sample rates across all files.
+                    Stitches audio instantly without re-encoding. Requires all files to have the exact same format and sample rate.
                   </p>
                 </div>
               </label>
@@ -1309,7 +1307,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
           <div className="flex items-center space-x-2">
             <FolderCheck className="w-5 h-5 text-amber-600" />
             <div>
-              <h3 className="font-bold text-sm text-stone-900">4. Local Output Folder</h3>
+              <h3 className="font-bold text-sm text-stone-900">Output Folder</h3>
               <p className="text-xs text-stone-500">
                 Destination where merged masters, transcription candidate logs, and final M4B files are written.
               </p>
@@ -1819,7 +1817,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
               {isRunning ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Processing Audio...</span>
+                  <span>Processing...</span>
                 </>
               ) : (
                 <>
@@ -1828,8 +1826,8 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
                     {chapterSource === 'existing_files'
                       ? 'Import Chapters & Continue'
                       : job.status !== 'draft'
-                      ? 'Re-run Step 1 Processing'
-                      : 'Run Step 1 Processing'}
+                      ? 'Re-Run Processing'
+                      : 'Processing'}
                   </span>
                 </>
               )}
