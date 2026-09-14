@@ -3,10 +3,47 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import https from 'https';
 import { execSync, exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
+
+// Utility to download a file
+function downloadFile(url: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(dest);
+    
+    const request = (currentUrl: string) => {
+      https.get(currentUrl, (response) => {
+        if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307 || response.statusCode === 308) {
+          if (response.headers.location) {
+            request(response.headers.location);
+          } else {
+            reject(new Error(`Redirected without location header: ${response.statusCode}`));
+          }
+          return;
+        }
+        
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to download: ${response.statusCode}`));
+          return;
+        }
+        
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          resolve();
+        });
+      }).on('error', (err) => {
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
+    };
+    
+    request(url);
+  });
+}
 
 function runSpawnCmd(cmd: string, args: string[], onLog: (msg: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -73,6 +110,13 @@ const app = express();
 const PORT = 3000;
 
 const RUNTIME_DIR = path.join(process.cwd(), 'runtime');
+const PORTABLE_PYTHON_DIR = path.join(RUNTIME_DIR, 'python');
+const isWin = os.platform() === 'win32';
+const PORTABLE_PYTHON_EXE = isWin ? path.join(PORTABLE_PYTHON_DIR, 'tools', 'python.exe') : path.join(PORTABLE_PYTHON_DIR, 'bin', 'python3');
+const PORTABLE_PYTHON_URL = isWin 
+    ? 'https://www.nuget.org/api/v2/package/python/3.10.11' 
+    : 'https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-3.10.15+20241016-x86_64-unknown-linux-gnu-install_only.tar.gz';
+
 const VENV_DIR = path.join(process.cwd(), '.venv');
 const getVenvPython = () => {
     const isWin = os.platform() === 'win32';
@@ -821,49 +865,74 @@ function checkBaseRequirements(): RequirementsReport {
   const hw = getFullHardwareEnvironment();
   const components: BaseRequirementItem[] = [];
 
-  // 1. Python Runtime
+// 1. Python Runtime
   let pythonStatus: BaseRequirementItem = {
     id: 'python',
     name: 'Python Runtime',
     purpose: 'Underlying programming runtime required for local WhisperX machine-learning components.',
     classification: 'required',
     status: 'missing',
-    isAppManaged: false,
+    isAppManaged: true,
   };
 
   try {
-    const pyVersionOut = execSync('python3 --version 2>&1 || python --version 2>&1', {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-      timeout: 3000,
-    }).trim();
-    const verMatch = pyVersionOut.match(/Python\s+([\d.]+)/i);
-    if (verMatch) {
-      const ver = verMatch[1];
-      let binPath = 'python3';
-      try {
-        binPath = execSync('which python3 2>&1 || where python 2>&1', { encoding: 'utf8', timeout: 2000 }).trim().split('\n')[0];
-      } catch (e) {}
+    let pyBin = '';
+    let ver = '';
 
+    // Check portable first
+    if (fs.existsSync(PORTABLE_PYTHON_EXE)) {
+      pyBin = PORTABLE_PYTHON_EXE;
+      const out = execSync(`"${pyBin}" --version`, { encoding: 'utf8', timeout: 2000 }).trim();
+      ver = out.replace('Python ', '');
+    } else {
+      // Check system path
+      const pyVersionOut = execSync('python3 --version 2>&1 || python --version 2>&1', {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+        timeout: 3000,
+      }).trim();
+      const verMatch = pyVersionOut.match(/Python\s+([\d.]+)/i);
+      if (verMatch) {
+        ver = verMatch[1];
+        try {
+          pyBin = execSync(isWin ? 'where python 2>&1' : 'which python3 2>&1 || which python 2>&1', { encoding: 'utf8', timeout: 2000 }).trim().split('\n')[0];
+        } catch (e) {}
+      }
+    }
+
+    if (ver) {
       pythonStatus.installedVersion = ver;
-      pythonStatus.availableVersion = '3.11.9 (Compatible)';
-      pythonStatus.installLocation = binPath;
+      pythonStatus.availableVersion = '3.10.11 (Isolated)';
+      pythonStatus.installLocation = pyBin;
 
       const majorMinor = ver.split('.').slice(0, 2).map(Number);
-      if (majorMinor[0] === 3 && majorMinor[1] >= 8 && majorMinor[1] <= 12) {
+      if (majorMinor[0] === 3 && majorMinor[1] >= 10 && majorMinor[1] <= 12) {
         pythonStatus.status = 'ready';
-        pythonStatus.diagnosticDetails = `Valid Python ${ver} detected. Fully compatible with PyTorch and WhisperX.`;
+        pythonStatus.diagnosticDetails = `${pyBin.includes('runtime') ? 'Isolated' : 'System'} Python ${ver} detected. Fully optimized.`;
+      } else if (majorMinor[0] === 3 && majorMinor[1] >= 8 && majorMinor[1] < 10) {
+        pythonStatus.status = 'ready';
+        pythonStatus.diagnosticDetails = `Python ${ver} is functional, but 3.10 is recommended for better performance.`;
       } else {
         pythonStatus.status = 'broken';
-        pythonStatus.error = `Python ${ver} found, but 3.9 - 3.11 is recommended for PyTorch/CUDA stability.`;
+        pythonStatus.error = `Python ${ver} detected. 3.10.x is the recommended "Gold Standard" for WhisperX stability.`;
+      }
+
+      // Ensure ensurepip is available if using system Python (required for venv)
+      if (pythonStatus.status === 'ready' && !pyBin.includes('runtime')) {
+        try {
+          execSync(`"${pyBin}" -c "import ensurepip"`, { stdio: 'ignore' });
+        } catch (e) {
+          pythonStatus.status = 'broken';
+          pythonStatus.error = `Python ${ver} is installed but the 'ensurepip' module is missing (common on Ubuntu/Debian without python3-venv). Click Install/Repair to deploy portable Python.`;
+        }
       }
     } else {
       pythonStatus.status = 'missing';
-      pythonStatus.error = 'Python was not found in your system PATH.';
+      pythonStatus.error = 'Python was not found. Clicking Install/Repair will download an isolated runtime for you.';
     }
   } catch (e: any) {
     pythonStatus.status = 'missing';
-    pythonStatus.error = 'Python runtime not detected in system PATH.';
+    pythonStatus.error = 'Python runtime not detected. Click Install/Repair to deploy a private copy.';
   }
   components.push(pythonStatus);
 
@@ -1100,19 +1169,29 @@ function checkBaseRequirements(): RequirementsReport {
   const hwInfo = getHardwareInfo();
   
   let statusColor: 'red' | 'yellow' | 'green' = 'red';
+  const pyVer = hwInfo.pythonVersion || '';
+  const isExperimentalPython = pyVer.includes('3.14') || pyVer.includes('3.15');
+
   if (!allReady) {
     statusColor = 'red';
-  } else if (hwInfo.mode === 'gpu') {
+  } else if (hwInfo.mode === 'gpu' && !isExperimentalPython) {
     statusColor = 'green';
   } else {
     statusColor = 'yellow';
   }
 
-  const summaryMessage = statusColor === 'green'
-    ? 'All required components are installed and ready with GPU acceleration.'
-    : statusColor === 'yellow'
-      ? 'CPU requirements met. GPU acceleration is not available (Whisper transcription will be slower).'
-      : `Attention required: ${needsAttention.length} required components are missing or broken.`;
+  let summaryMessage = '';
+  if (statusColor === 'green') {
+    summaryMessage = 'All required components are installed and ready with GPU acceleration (Python 3.10).';
+  } else if (statusColor === 'yellow') {
+    if (isExperimentalPython) {
+      summaryMessage = `Python ${pyVer} detected. This version is unsupported by some AI components. Downgrade to Python 3.10.11 is required for GPU support.`;
+    } else {
+      summaryMessage = 'CPU requirements met. GPU acceleration is not available (Whisper transcription will be slower).';
+    }
+  } else {
+    summaryMessage = `Attention required: ${needsAttention.length} required components are missing or broken.`;
+  }
 
   return {
     timestamp: new Date().toISOString(),
@@ -1217,13 +1296,36 @@ app.post('/api/requirements/install-repair', async (req, res) => {
             }
           }
         } else if (comp.id === 'python') {
-          activeInstallProgress.currentActivity = 'Checking Python installation...';
-          activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Python is a system dependency. Verifying system paths...`);
+          activeInstallProgress.currentActivity = 'Deploying Isolated Python Runtime...';
+          activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] No system Python 3.10-3.12 detected.`);
+          activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Downloading isolated Python 3.12.7 distribution...`);
+
           try {
-            const pyTest = execSync('python3 --version 2>&1 || python --version 2>&1', { encoding: 'utf8' }).trim();
-            activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Python verification: ${pyTest}`);
-          } catch (e: any) {
-            activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Python executable not found in PATH. Please ensure Python 3.10+ is installed on the host system.`);
+            if (!fs.existsSync(RUNTIME_DIR)) fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+            if (!fs.existsSync(PORTABLE_PYTHON_DIR)) fs.mkdirSync(PORTABLE_PYTHON_DIR, { recursive: true });
+
+            const zipDest = path.join(RUNTIME_DIR, 'python.zip');
+            await downloadFile(PORTABLE_PYTHON_URL, zipDest);
+            activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Download complete. Extracting to ${PORTABLE_PYTHON_DIR}...`);
+
+            // Extraction using system tools to keep binary count low
+            if (isWin) {
+              await execAsync(`powershell -Command "Expand-Archive -Path '${zipDest}' -DestinationPath '${PORTABLE_PYTHON_DIR}' -Force"`);
+            } else {
+              await execAsync(`tar -xzf "${zipDest}" -C "${PORTABLE_PYTHON_DIR}" --strip-components=1`);
+            }
+            
+            // Cleanup zip
+            try { fs.unlinkSync(zipDest); } catch(e) {}
+
+            if (fs.existsSync(PORTABLE_PYTHON_EXE)) {
+              activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Isolated Python runtime successfully deployed.`);
+            } else {
+              throw new Error("Extraction failed: Python executable not found in expected location.");
+            }
+          } catch (err: any) {
+            activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Critical Error during Python deployment: ${err.message}`);
+            throw err;
           }
         } else if (comp.id === 'pytorch' || comp.id === 'torchaudio' || comp.id === 'whisperx') {
           const hw = report.hardware;
@@ -1242,10 +1344,11 @@ app.post('/api/requirements/install-repair', async (req, res) => {
              const venvConfigPath = path.join(VENV_DIR, "pyvenv.cfg");
              if (!fs.existsSync(VENV_DIR) || !fs.existsSync(venvPythonExec) || !fs.existsSync(venvConfigPath)) {
                  logFn(`Creating isolated application runtime at ${VENV_DIR}...`);
-                 let pyExe = 'python';
-                 try {
-                     execSync('python --version');
-                 } catch (e) {
+                 let pyExe = fs.existsSync(PORTABLE_PYTHON_EXE) ? PORTABLE_PYTHON_EXE : 'python';
+                 if (pyExe === 'python') {
+                     try {
+                      execSync('python --version');
+                    } catch (e) {
                      try {
                          execSync('python3 --version');
                          pyExe = 'python3';
@@ -1257,6 +1360,7 @@ app.post('/api/requirements/install-repair', async (req, res) => {
                              throw new Error("Could not find python, python3, or py on this system. Please install Python 3.10+.");
                          }
                      }
+                 }
                  }
                  await runSpawnCmd(pyExe, ['-m', 'venv', VENV_DIR], logFn);
              }
@@ -1285,7 +1389,16 @@ app.post('/api/requirements/install-repair', async (req, res) => {
              
              // 3. WhisperX
              logFn(`Installing WhisperX into private runtime...`);
-             await runSpawnCmd(finalPipExec, ['install', 'whisperx'], logFn);
+             try {
+                await runSpawnCmd(finalPipExec, ['install', 'whisperx'], logFn);
+             } catch (err: any) {
+                if (report.hardware.pythonVersion?.includes('3.14')) {
+                    logFn(`CRITICAL ERROR: WhisperX / ctranslate2 does not yet support Python 3.14.`);
+                    logFn(`ACTION REQUIRED: Please uninstall Python 3.14 and install Python 3.12 (64-bit) from python.org.`);
+                    throw new Error("Python 3.14 Incompatibility Detected. Please use Python 3.10, 3.11, or 3.12.");
+                }
+                throw err;
+             }
              
              activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Successfully configured private transcription engine.`);
           } catch (err: any) {
