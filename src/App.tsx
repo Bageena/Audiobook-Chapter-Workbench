@@ -18,11 +18,11 @@ import { ConfigModal } from './components/ConfigModal';
 import { NewJobModal } from './components/NewJobModal';
 import { RequirementsModal } from './components/RequirementsModal';
 import { LogsDrawer } from './components/LogsDrawer';
-import { CheckCircle2, Clock, HardDrive, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Clock, HardDrive, AlertCircle, Plus, ArrowRight, Trash2 } from 'lucide-react';
 
 export default function App() {
   const [jobs, setJobs] = useState<AudiobookJob[]>([]);
-  const [currentJobId, setCurrentJobId] = useState<string>('');
+  const [currentJobId, setCurrentJobId] = useState<string | null>(localStorage.getItem('workbench_active_job_id'));
   const [config, setConfig] = useState<WorkbenchConfig | null>(null);
   const [activeStep, setActiveStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
@@ -38,6 +38,16 @@ export default function App() {
   const [showRequirementsModal, setShowRequirementsModal] = useState<boolean>(false);
   const [showLogsDrawer, setShowLogsDrawer] = useState<boolean>(false);
 
+  // Helper to determine the starting step based on job status
+  const getStartingStepForJob = (job: AudiobookJob): 1 | 2 | 3 | 4 | 5 => {
+    if (job.status === 'draft') return 1;
+    if (job.status === 'transcribed' || job.status === 'merged') return 2;
+    if (job.status === 'metadata_ready') return 3;
+    if (job.status === 'built') return 4;
+    if (job.status === 'validated') return 5;
+    return 1;
+  };
+
   // Initial fetch
   useEffect(() => {
     async function loadInitialData() {
@@ -50,19 +60,15 @@ export default function App() {
         const cfgData = await cfgRes.json();
         setJobs(jobsData);
         setConfig(cfgData);
-        if (jobsData.length > 0) {
-          setCurrentJobId(jobsData[0].id);
-          // Determine starting step based on job state
-          if (jobsData[0].status === 'draft') {
-            setActiveStep(1);
-          } else if (jobsData[0].status === 'transcribed' || jobsData[0].status === 'merged') {
-            setActiveStep(2);
-          } else if (jobsData[0].status === 'metadata_ready') {
-            setActiveStep(4);
-          } else if (jobsData[0].status === 'built') {
-            setActiveStep(4);
-          } else if (jobsData[0].status === 'validated') {
-            setActiveStep(5);
+        
+        // Validate saved jobId exists
+        if (currentJobId && !jobsData.find((j: any) => j.id === currentJobId)) {
+           setCurrentJobId(null);
+           localStorage.removeItem('workbench_active_job_id');
+        } else if (currentJobId) {
+          const job = jobsData.find((j: any) => j.id === currentJobId);
+          if (job) {
+             setActiveStep(getStartingStepForJob(job));
           }
         }
       } catch (err) {
@@ -74,7 +80,31 @@ export default function App() {
     loadInitialData();
   }, []);
 
+  // Persist active job ID
+  useEffect(() => {
+    if (currentJobId) {
+      localStorage.setItem('workbench_active_job_id', currentJobId);
+    } else {
+      localStorage.removeItem('workbench_active_job_id');
+    }
+  }, [currentJobId]);
+
   const currentJob = jobs.find((j) => j.id === currentJobId) || null;
+
+  // Handler for closing the project
+  const handleCloseProject = () => {
+    setCurrentJobId(null);
+    setActiveStep(1);
+  };
+
+  // Handler for opening a project
+  const handleOpenProject = (id: string) => {
+    setCurrentJobId(id);
+    const job = jobs.find(j => j.id === id);
+    if (job) {
+      setActiveStep(getStartingStepForJob(job));
+    }
+  };
 
   // Refresh current job from server
   const refreshCurrentJob = async (jobId: string) => {
@@ -260,6 +290,72 @@ export default function App() {
     setActiveStep(1);
   };
 
+  const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
+
+  // Toggle selection for a job
+  const toggleJobSelection = (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    setSelectedJobIds(prev => 
+        prev.includes(jobId) 
+            ? prev.filter(id => id !== jobId) 
+            : [...prev, jobId]
+    );
+  };
+
+  // Bulk Delete Handler
+  const handleDeleteMultiple = async () => {
+    const count = selectedJobIds.length;
+    if (count === 0) return;
+
+    const confirmMsg = `Are you sure you want to delete ${count} selected project${count > 1 ? 's' : ''}?\n\nThis will permanently remove all project data and Workbench-managed files.`;
+    
+    if (window.confirm(confirmMsg)) {
+        try {
+            // Process deletions sequentially or in parallel
+            await Promise.all(selectedJobIds.map(id => 
+                fetch(`/api/jobs/${id}`, { method: 'DELETE' })
+            ));
+            
+            setJobs(prev => prev.filter(j => !selectedJobIds.includes(j.id)));
+            if (currentJobId && selectedJobIds.includes(currentJobId)) {
+                setCurrentJobId(null);
+                setActiveStep(1);
+            }
+            setSelectedJobIds([]);
+        } catch (err: any) {
+            alert(`Bulk Delete Error: ${err.message}`);
+        }
+    }
+  };
+
+  // Delete Job Handler
+  const handleDeleteProject = async (e: React.MouseEvent, jobId: string, jobName: string) => {
+    e.stopPropagation(); // Don't trigger the "Open Project" click
+    
+    const confirmMsg = `Are you sure you want to delete the project "${jobName}"?\n\nThis will permanently remove the project data and any files uploaded to the Workbench. Files stored outside of the program folder will not be removed.`;
+    
+    if (window.confirm(confirmMsg)) {
+        try {
+            const res = await fetch(`/api/jobs/${jobId}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) {
+                setJobs(prev => prev.filter(j => j.id !== jobId));
+                setSelectedJobIds(prev => prev.filter(id => id !== jobId));
+                if (currentJobId === jobId) {
+                    setCurrentJobId(null);
+                    setActiveStep(1);
+                }
+            } else {
+                const data = await res.json();
+                throw new Error(data.error || 'Delete failed');
+            }
+        } catch (err: any) {
+            alert(`Delete Error: ${err.message}`);
+        }
+    }
+  };
+
   const formatDuration = (sec: number) => {
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
@@ -287,17 +383,8 @@ export default function App() {
       <Header
         jobs={jobs}
         currentJob={currentJob}
-        onSelectJob={(id) => {
-          setCurrentJobId(id);
-          const job = jobs.find((j) => j.id === id);
-          if (job) {
-            if (job.status === 'draft') setActiveStep(1);
-            else if (job.status === 'transcribed') setActiveStep(2);
-            else if (job.status === 'metadata_ready') setActiveStep(3);
-            else if (job.status === 'built') setActiveStep(4);
-            else if (job.status === 'validated') setActiveStep(5);
-          }
-        }}
+        onSelectJob={handleOpenProject}
+        onCloseProject={handleCloseProject}
         onOpenNewJob={() => setShowNewJobModal(true)}
         onOpenSettings={() => setShowConfigModal(true)}
         onOpenPurge={() => setShowPurgeModal(true)}
@@ -331,18 +418,26 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="flex items-center space-x-4 text-xs font-mono text-stone-600">
-                  <span className="flex items-center space-x-1.5">
-                    <Clock className="w-3.5 h-3.5 text-stone-400" />
-                    <span>{formatDuration(currentJob.totalDurationSeconds)}</span>
-                  </span>
-                  <span>•</span>
-                  <span>{currentJob.parts.length} source parts</span>
-                  <span>•</span>
-                  <span className="flex items-center space-x-1.5">
-                    <HardDrive className="w-3.5 h-3.5 text-stone-400" />
-                    <span>{(currentJob.totalSizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
-                  </span>
+                <div className="flex flex-col items-end space-y-2">
+                    <div className="flex items-center space-x-4 text-xs font-mono text-stone-600">
+                        <span className="flex items-center space-x-1.5">
+                            <Clock className="w-3.5 h-3.5 text-stone-400" />
+                            <span>{formatDuration(currentJob.totalDurationSeconds)}</span>
+                        </span>
+                        <span>•</span>
+                        <span>{currentJob.parts.length} source parts</span>
+                        <span>•</span>
+                        <span className="flex items-center space-x-1.5">
+                            <HardDrive className="w-3.5 h-3.5 text-stone-400" />
+                            <span>{(currentJob.totalSizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
+                        </span>
+                    </div>
+                    <button 
+                        onClick={handleCloseProject}
+                        className="text-[11px] font-semibold text-stone-500 hover:text-stone-900 flex items-center space-x-1 cursor-pointer transition-colors"
+                    >
+                        <span>&larr; Close Project & Return to Dashboard</span>
+                    </button>
                 </div>
               </div>
 
@@ -443,17 +538,124 @@ export default function App() {
             )}
           </>
         ) : (
-          <div className="bg-white rounded-xl p-12 text-center border border-stone-200 shadow-xs space-y-4">
-            <h2 className="text-lg font-bold text-stone-900">No Audiobooks Available</h2>
-            <p className="text-xs text-stone-500 max-w-sm mx-auto">
-              Click the button below to add your first multi-part audiobook job.
-            </p>
-            <button
-              onClick={() => setShowNewJobModal(true)}
-              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg cursor-pointer"
-            >
-              Add New Audiobook
-            </button>
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl p-8 border border-stone-200 shadow-xs">
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <h2 className="text-2xl font-bold text-stone-900">Audiobook Projects</h2>
+                        <p className="text-sm text-stone-500 mt-1">Select an active book to begin processing or create a new project.</p>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                        {selectedJobIds.length > 0 && (
+                            <button
+                                onClick={handleDeleteMultiple}
+                                className="flex items-center space-x-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-lg cursor-pointer transition-all border border-red-200"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                <span>Delete {selectedJobIds.length} Selected</span>
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setShowNewJobModal(true)}
+                            className="flex items-center space-x-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold rounded-lg cursor-pointer transition-all shadow-sm"
+                        >
+                            <Plus className="w-4 h-4" />
+                            <span>Create New Book</span>
+                        </button>
+                    </div>
+                </div>
+
+                {jobs.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {jobs.map((job) => (
+                            <div
+                                key={job.id}
+                                onClick={() => handleOpenProject(job.id)}
+                                className={`relative bg-stone-50 hover:bg-white p-5 pt-8 rounded-xl border transition-all hover:shadow-md group cursor-pointer ${
+                                    selectedJobIds.includes(job.id) ? 'border-amber-500 ring-1 ring-amber-500/20 bg-amber-50/10' : 'border-stone-200 hover:border-amber-400'
+                                }`}
+                            >
+                                {/* Selection Circle */}
+                                <div 
+                                    onClick={(e) => toggleJobSelection(e, job.id)}
+                                    className={`absolute top-3 left-3 w-5 h-5 rounded-full border-2 transition-all flex items-center justify-center ${
+                                        selectedJobIds.includes(job.id) 
+                                            ? 'bg-amber-500 border-amber-500' 
+                                            : 'bg-white border-stone-300 opacity-0 group-hover:opacity-100 hover:border-amber-400'
+                                    }`}
+                                >
+                                    {selectedJobIds.includes(job.id) && (
+                                        <div className="w-2 h-2 bg-white rounded-full shadow-sm" />
+                                    )}
+                                </div>
+
+                                <div className="flex items-start justify-between">
+                                    <div className="space-y-1">
+                                        <h3 className="font-bold text-stone-900 group-hover:text-amber-900 transition-colors">{job.name}</h3>
+                                        <p className="text-xs text-stone-500 line-clamp-1">{job.author || 'No Author'} • {job.narrator || 'No Narrator'}</p>
+                                    </div>
+                                    <div className="flex flex-col items-end space-y-2">
+                                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
+                                            job.status === 'validated' ? 'bg-emerald-100 text-emerald-700' :
+                                            job.status === 'draft' ? 'bg-stone-200 text-stone-600' : 'bg-amber-100 text-amber-700'
+                                        }`}>
+                                            {job.status}
+                                        </span>
+                                        <button
+                                            onClick={(e) => handleDeleteProject(e, job.id, job.name)}
+                                            className="p-1.5 text-stone-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                            title="Delete project"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="mt-4 flex items-center justify-between text-[11px] text-stone-400 font-mono">
+                                    <div className="flex items-center space-x-3">
+                                        <span className="flex items-center space-x-1">
+                                            <Clock className="w-3 h-3" />
+                                            <span>{formatDuration(job.totalDurationSeconds)}</span>
+                                        </span>
+                                        <span>•</span>
+                                        <span>{job.parts.length} files</span>
+                                    </div>
+                                    <span className="text-amber-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-1">
+                                        <span>Open</span>
+                                        <ArrowRight className="w-3 h-3" />
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="py-20 text-center border-2 border-dashed border-stone-200 rounded-xl">
+                        <div className="w-16 h-16 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-4 text-stone-400">
+                            <HardDrive className="w-8 h-8" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-stone-900">No books found</h3>
+                        <p className="text-sm text-stone-500 max-w-xs mx-auto mt-2">Get started by creating your first audiobook processing project.</p>
+                        <button
+                            onClick={() => setShowNewJobModal(true)}
+                            className="mt-6 px-4 py-2 bg-stone-900 text-white rounded-lg text-sm font-medium hover:bg-stone-800 transition-colors"
+                        >
+                            Create Project
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Quick Start / Help Card */}
+            <div className="bg-amber-50/50 rounded-xl p-6 border border-amber-200/50 flex items-start space-x-4">
+                <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                    <h3 className="text-sm font-bold text-amber-900">Single Project Focus</h3>
+                    <p className="text-xs text-amber-800/80 mt-1 leading-relaxed max-w-2xl">
+                        The Workbench now operates in <strong>Single Project Mode</strong> to ensure that audio imports, WhisperX transcriptions, and metadata tags are always perfectly assigned to the correct book. Select a book from the list above to resume your work, or create a new one to begin a fresh import.
+                    </p>
+                </div>
+            </div>
           </div>
         )}
       </main>

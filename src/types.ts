@@ -365,6 +365,7 @@ export interface HardwareEnvironmentInfo {
 export interface RequirementsReport {
   timestamp: string;
   allReady: boolean;
+  statusColor: 'red' | 'yellow' | 'green';
   needsAttentionCount: number;
   summaryMessage: string;
   hardware: HardwareEnvironmentInfo;

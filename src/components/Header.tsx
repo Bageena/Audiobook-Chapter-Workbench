@@ -6,6 +6,7 @@ interface HeaderProps {
   jobs: AudiobookJob[];
   currentJob: AudiobookJob | null;
   onSelectJob: (jobId: string) => void;
+  onCloseProject: () => void;
   onOpenNewJob: () => void;
   onOpenSettings: () => void;
   onOpenPurge: () => void;
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   jobs,
   currentJob,
   onSelectJob,
+  onCloseProject,
   onOpenNewJob,
   onOpenSettings,
   onOpenPurge,
@@ -25,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleLogs,
   showLogs,
 }) => {
-  const [hasRequirementsWarning, setHasRequirementsWarning] = useState<boolean>(false);
+  const [statusColor, setStatusColor] = useState<'red' | 'yellow' | 'green'>('red');
 
   // Check requirements health on load
   useEffect(() => {
@@ -35,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
         const res = await fetch('/api/requirements/status');
         if (res.ok && isMounted) {
           const data = await res.json();
-          setHasRequirementsWarning(!data.allReady);
+          setStatusColor(data.statusColor || 'red');
         }
       } catch (e) {}
     };
@@ -65,38 +67,48 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
             <p className="text-xs text-stone-400 hidden sm:block">
-              Multi-format audio • YouTube import • WhisperX AI detection • M4B & chaptered audio compiler
+              Import, transcribe, organize, and compile audiobooks, one project at a time.
             </p>
           </div>
         </div>
 
-        {/* Center: Active Job Selector */}
+        {/* Center: Active Job Display / Navigation */}
         <div className="flex items-center space-x-2">
-          <div className="flex items-center bg-stone-800/80 rounded-lg border border-stone-700/60 p-1">
-            <BookOpen className="w-4 h-4 text-stone-400 ml-2" />
-            <select
-              id="job-select-dropdown"
-              value={currentJob?.id || ''}
-              onChange={(e) => onSelectJob(e.target.value)}
-              className="bg-transparent text-sm text-stone-100 font-medium px-2 py-1 focus:outline-none cursor-pointer"
-            >
-              {jobs.map((j) => (
-                <option key={j.id} value={j.id} className="bg-stone-900 text-stone-100">
-                  {j.name} ({j.parts.length} parts)
-                </option>
-              ))}
-            </select>
-          </div>
+          {currentJob ? (
+            <div className="flex items-center bg-stone-800/80 rounded-lg border border-stone-700/60 px-3 py-1.5 space-x-3">
+              <div className="flex items-center space-x-2">
+                <BookOpen className="w-4 h-4 text-amber-500" />
+                <span className="text-sm font-bold text-stone-50 truncate max-w-[200px]">
+                  {currentJob.name}
+                </span>
+              </div>
+              <div className="h-4 w-px bg-stone-700"></div>
+              <button 
+                onClick={onCloseProject}
+                className="text-[10px] uppercase tracking-wider font-bold text-stone-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Switch Book
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center bg-stone-800/80 rounded-lg border border-stone-700/60 px-3 py-1.5">
+              <span className="text-xs font-bold text-stone-500 uppercase tracking-widest">
+                No Active Project
+              </span>
+            </div>
+          )}
 
-          <button
-            id="btn-new-job"
-            onClick={onOpenNewJob}
-            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer"
-            title="Create new audiobook job"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Add Book</span>
-          </button>
+          {!currentJob && (
+            <button
+              id="btn-new-job"
+              onClick={onOpenNewJob}
+              className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer"
+              title="Create new audiobook job"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Add Book</span>
+            </button>
+          )}
         </div>
 
         {/* Right actions: Requirements, Purge, Settings, Logs toggle */}
@@ -105,7 +117,9 @@ export const Header: React.FC<HeaderProps> = ({
             id="btn-open-requirements"
             onClick={onOpenRequirements}
             className={`flex items-center space-x-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors cursor-pointer relative ${
-              hasRequirementsWarning
+              statusColor === 'red'
+                ? 'border-red-500 bg-red-950/40 text-red-300 hover:bg-red-900/50'
+                : statusColor === 'yellow'
                 ? 'border-amber-500 bg-amber-950/40 text-amber-300 hover:bg-amber-900/50'
                 : 'border-stone-700 text-stone-300 hover:bg-stone-800 hover:text-stone-100'
             }`}
@@ -113,14 +127,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Wrench className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Requirements</span>
-            {hasRequirementsWarning ? (
+            {statusColor === 'red' ? (
+              <span className="flex h-2 w-2 relative -mr-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+              </span>
+            ) : statusColor === 'yellow' ? (
               <span className="flex h-2 w-2 relative -mr-0.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
               </span>
             ) : (
               <span className="flex h-2 w-2 relative -mr-0.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
             )}

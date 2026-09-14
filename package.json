@@ -10,7 +10,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.22.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "lucide-react": "^1.16.0",

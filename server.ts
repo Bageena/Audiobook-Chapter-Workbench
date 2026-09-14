@@ -8,21 +8,47 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
-function runSpawnCmd(cmd, args, onLog) {
+function runSpawnCmd(cmd: string, args: string[], onLog: (msg: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { shell: true });
+    const isWin = os.platform() === 'win32';
+    
+    // On Windows, when using shell: true, it's often more reliable to pass a single command string
+    // especially when paths contain spaces.
+    let child;
+    if (isWin) {
+        const processedArgs = args.map(arg => {
+            // Quote arguments that have spaces and aren't already quoted
+            if (arg.includes(' ') && !arg.startsWith('"')) {
+                return `"${arg}"`;
+            }
+            return arg;
+        });
+        const processedCmd = (cmd.includes(' ') && !cmd.startsWith('"')) ? `"${cmd}"` : cmd;
+        const fullCommandLine = `${processedCmd} ${processedArgs.join(' ')}`;
+        
+        console.log(`[Spawn:Win] ${fullCommandLine}`);
+        child = spawn(fullCommandLine, [], { shell: true });
+    } else {
+        console.log(`[Spawn:Posix] ${cmd} ${args.join(' ')}`);
+        child = spawn(cmd, args, { shell: false });
+    }
     
     child.stdout.on('data', (data) => {
-      const lines = data.toString().split('\n');
+      const str = data.toString();
+      // Also write directly to the system process stdout for "real" terminal feel
+      process.stdout.write(str);
+      const lines = str.split('\n');
       for (const line of lines) {
         if (line.trim()) onLog(line.trim());
       }
     });
     
     child.stderr.on('data', (data) => {
-      const lines = data.toString().split('\n');
+      const str = data.toString();
+      // PIP and FFmpeg often use stderr for progress bars
+      process.stderr.write(str);
+      const lines = str.split('\n');
       for (const line of lines) {
-        // Just log it, don't fail yet (pip uses stderr for progress/info sometimes)
         if (line.trim()) onLog(line.trim());
       }
     });
@@ -42,43 +68,28 @@ function runSpawnCmd(cmd, args, onLog) {
 }
 import { createServer as createViteServer } from 'vite';
 import multer from 'multer';
-import { GoogleGenAI } from '@google/genai';
-import {
-  AudiobookJob,
-  WorkbenchConfig,
-  ChapterCandidate,
-  ChapterEntry,
-  AlignedWord,
-  AudiobookMetadata,
-  CoverArtInfo,
-  HardwareInfo,
-  SpeechModelInfo,
-  FolderScanResult,
-  DiscoveredAudioFile,
-  DiscoveredMp3File,
-  UnsupportedFileItem,
-  ChapterSourceType,
-  AudioMergeMethodType,
-  YouTubeVideoInfo,
-  YtDlpStatusInfo,
-  YtDlpStatusState,
-  OutputAudioFormat,
-  YouTubeAudioFormat,
-  Step1InputMethod,
-  BaseRequirementItem,
-  HardwareEnvironmentInfo,
-  RequirementsReport,
-  InstallRepairProgress,
-  Step1ProcessState,
-  Step1ProcessStage
-} from './src/types.js';
 
 const app = express();
 const PORT = 3000;
 
 const RUNTIME_DIR = path.join(process.cwd(), 'runtime');
-const VENV_DIR = path.join(RUNTIME_DIR, 'venv');
-const getVenvPython = () => os.platform() === 'win32' ? path.join(VENV_DIR, 'Scripts', 'python.exe') : path.join(VENV_DIR, 'bin', 'python');
+const VENV_DIR = path.join(process.cwd(), '.venv');
+const getVenvPython = () => {
+    const isWin = os.platform() === 'win32';
+    return isWin ? path.join(VENV_DIR, 'Scripts', 'python.exe') : path.join(VENV_DIR, 'bin', 'python');
+};
+const getVenvPip = () => {
+    const isWin = os.platform() === 'win32';
+    return isWin ? path.join(VENV_DIR, 'Scripts', 'pip.exe') : path.join(VENV_DIR, 'bin', 'pip');
+};
+
+console.log(`[Startup] CWD: ${process.cwd()}`);
+console.log(`[Startup] VENV_DIR: ${VENV_DIR}`);
+console.log(`[Startup] Expected Python: ${getVenvPython()}`);
+console.log(`[Startup] Venv Exists: ${fs.existsSync(VENV_DIR)}`);
+if (fs.existsSync(VENV_DIR)) {
+    console.log(`[Startup] Python Exists: ${fs.existsSync(getVenvPython())}`);
+}
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -93,8 +104,9 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    // Preserve the original name but ensure it's safe
-    cb(null, file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_'));
+    // Preserve the original name but ensure it's safe. 
+    // Allowing spaces as users expect them to be preserved in their project parts.
+    cb(null, file.originalname.replace(/[^a-zA-Z0-9_.\- ]/g, '_'));
   }
 });
 
@@ -104,18 +116,43 @@ app.post('/api/upload-audio', upload.array('files'), (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No files uploaded.' });
   }
+
+  const jobId = req.query.jobId as string;
+  if (!jobId) {
+    // Cleanup files if they were uploaded without a jobId
+    (req.files as Express.Multer.File[]).forEach(f => {
+      try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (e) {}
+    });
+    return res.status(400).json({ error: 'No active project selected. Please create or open a book project first.' });
+  }
+
+  const finalUploadDir = path.join(uploadDir, jobId);
+  if (!fs.existsSync(finalUploadDir)) {
+    fs.mkdirSync(finalUploadDir, { recursive: true });
+  }
   
-  const uploadedFiles = req.files.map(f => ({
-    originalName: f.originalname,
-    filename: f.filename,
-    path: f.path,
-    size: f.size
-  }));
+  const uploadedFiles = (req.files as Express.Multer.File[]).map(f => {
+    const newPath = path.join(finalUploadDir, f.filename);
+    fs.renameSync(f.path, newPath);
+    const finalPath = newPath;
+
+    // Probe the file for accurate metadata
+    const probe = probeAudioFile(finalPath);
+
+    return {
+      originalName: f.originalname,
+      filename: f.filename,
+      path: finalPath,
+      size: f.size,
+      durationSeconds: probe.durationSeconds,
+      bitrate: probe.bitrate
+    };
+  });
   
   res.json({
     message: 'Successfully uploaded files.',
     files: uploadedFiles,
-    uploadDir
+    uploadDir: finalUploadDir
   });
 });
 
@@ -255,8 +292,30 @@ function generateFFMetaContent(chapters: ChapterEntry[], totalDurationSeconds: n
   return content;
 }
 
+const JOBS_FILE = path.join(process.cwd(), 'jobs.json');
+
+function saveJobs() {
+    try {
+        fs.writeFileSync(JOBS_FILE, JSON.stringify(jobs, null, 2));
+    } catch (e) {
+        console.error('Failed to save jobs:', e);
+    }
+}
+
+function loadJobs() {
+    if (fs.existsSync(JOBS_FILE)) {
+        try {
+            const data = fs.readFileSync(JOBS_FILE, 'utf8');
+            return JSON.parse(data);
+        } catch (e) {
+            console.error('Failed to load jobs:', e);
+        }
+    }
+    return null;
+}
+
 // In-Memory store initialized with realistic sample jobs to demonstrate the exact workbench pipeline
-let jobs: AudiobookJob[] = [
+let jobs: AudiobookJob[] = loadJobs() || [
   {
     id: "dune-part-1",
     name: "Dune",
@@ -337,89 +396,14 @@ let jobs: AudiobookJob[] = [
         status: "approved",
         notes: "Clear spoken chapter heading",
       },
-      {
-        candidate_id: 3,
-        candidate_start: "00:43:10.200",
-        candidate_end: "00:43:12.800",
-        matched_text: "Chapter 2",
-        context_before: "The Reverend Mother turned her hood and stepped toward the ornithopter.",
-        context_after: "The Reverend Mother Gaius Helen Mohiam sat back into the cushions.",
-        confidence: "0.95",
-        proposed_title: "Chapter 2: Caladan Departure",
-        status: "approved",
-        notes: "Narrator header detected",
-      },
-      {
-        candidate_id: 4,
-        candidate_start: "01:08:45.000",
-        candidate_end: "01:08:47.300",
-        matched_text: "Chapter 3",
-        context_before: "Arrakis teaches the attitude of the knife, chopping off what is incomplete.",
-        context_after: "The night had descended over Arrakeen.",
-        confidence: "0.94",
-        proposed_title: "Chapter 3: Arrival on Arrakis",
-        status: "approved",
-        notes: "Lead-in of 1.5s applied",
-      },
-      {
-        candidate_id: 5,
-        candidate_start: "01:36:18.000",
-        candidate_end: "01:36:20.500",
-        matched_text: "Chapter 4",
-        context_before: "Duke Leto Atreides paced the stone floor of the Great Hall.",
-        context_after: "Thufir Hawat bowed stiffly from the doorway.",
-        confidence: "0.96",
-        proposed_title: "Chapter 4: The Hall of Arrakeen",
-        status: "review",
-        notes: "Pending final review",
-      },
-      {
-        candidate_id: 6,
-        candidate_start: "02:01:50.000",
-        candidate_end: "02:01:52.200",
-        matched_text: "Interlude",
-        context_before: "The desert wind whispered across the deep basin of the shield wall.",
-        context_after: "Report from the spice harvester expedition.",
-        confidence: "0.91",
-        proposed_title: "Interlude: The Spice Harvester",
-        status: "review",
-        notes: "Keyword interlude",
-      },
     ],
     chapters: [
       { id: "c1", start: "00:00:00.000", title: "Prologue / Beginning" },
       { id: "c2", start: "00:14:22.500", title: "Chapter 1: The Gom Jabbar" },
-      { id: "c3", start: "00:43:10.200", title: "Chapter 2: Caladan Departure" },
-      { id: "c4", start: "01:08:45.000", title: "Chapter 3: Arrival on Arrakis" },
-      { id: "c5", start: "01:36:18.000", title: "Chapter 4: The Hall of Arrakeen" },
-      { id: "c6", start: "02:01:50.000", title: "Interlude: The Spice Harvester" },
     ],
     logs: [
       { timestamp: "2026-09-12 14:10:02", level: "INFO", message: "Initial job created with 3 MP3 source pieces." },
-      { timestamp: "2026-09-12 14:10:20", level: "INFO", message: "Step 1: Decoding 3 source files to standardized raw PCM 44.1kHz s16le stereo." },
-      { timestamp: "2026-09-12 14:10:45", level: "INFO", message: "PCM streams stitched successfully. Encoded CBR MP3 at 128 kbps." },
       { timestamp: "2026-09-12 14:11:00", level: "INFO", message: "WhisperX transcription completed. 840 segments, 6 candidate chapter markers extracted." },
-    ],
-  },
-  {
-    id: "hitchhikers-guide",
-    name: "The Hitchhiker's Guide to the Galaxy",
-    author: "Douglas Adams",
-    narrator: "Stephen Fry",
-    createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
-    parts: [
-      { id: "hg1", name: "01 - Hitchhiker Part 1.mp3", sizeBytes: 42000000, durationSeconds: 2100, bitrate: 128, order: 1 },
-      { id: "hg2", name: "02 - Hitchhiker Part 2.mp3", sizeBytes: 44000000, durationSeconds: 2200, bitrate: 128, order: 2 },
-    ],
-    totalDurationSeconds: 4300,
-    totalSizeBytes: 86000000,
-    status: 'draft',
-    candidates: [],
-    chapters: [
-      { id: "hgc1", start: "00:00:00.000", title: "Chapter 1" },
-    ],
-    logs: [
-      { timestamp: "2026-09-11 09:30:00", level: "INFO", message: "Input folder loaded with 2 MP3 pieces. Ready for Step 1 Merge & Detect." },
     ],
   },
 ];
@@ -747,6 +731,7 @@ let activeInstallProgress: InstallRepairProgress = {
 };
 
 // Global active Step 1 processing progress state
+let jobIdForStep1: string | null = null;
 let activeStep1ProgressState: Step1ProcessState = {
   isActive: false,
   stage: 'idle',
@@ -894,9 +879,12 @@ function checkBaseRequirements(): RequirementsReport {
 
   let torchInstalled = false;
   let torchVer = '';
-  if (pythonStatus.status === 'ready' || pythonStatus.installedVersion) {
+  const venvPythonPath = getVenvPython();
+  const venvConfigPath = path.join(VENV_DIR, 'pyvenv.cfg');
+  
+  if ((pythonStatus.status === 'ready' || pythonStatus.installedVersion) && fs.existsSync(venvPythonPath) && fs.existsSync(venvConfigPath)) {
     try {
-      const torchOut = execSync(`"${getVenvPython()}" -c "import torch; print(torch.__version__, torch.cuda.is_available())" 2>&1`, {
+      const torchOut = execSync(`"${venvPythonPath}" -c "import torch; print(torch.__version__, torch.cuda.is_available())" 2>&1`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
         timeout: 4000,
@@ -944,9 +932,9 @@ function checkBaseRequirements(): RequirementsReport {
   };
 
   let torchaudioInstalled = false;
-  if (pythonStatus.status === 'ready' || pythonStatus.installedVersion) {
+  if ((pythonStatus.status === 'ready' || pythonStatus.installedVersion) && fs.existsSync(venvPythonPath) && fs.existsSync(venvConfigPath)) {
     try {
-      const taOut = execSync(`"${getVenvPython()}" -c "import torchaudio; print(torchaudio.__version__)" 2>&1`, {
+      const taOut = execSync(`"${venvPythonPath}" -c "import torchaudio; print(torchaudio.__version__)" 2>&1`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
         timeout: 4000,
@@ -978,9 +966,9 @@ function checkBaseRequirements(): RequirementsReport {
   };
 
   let wxInstalled = false;
-  if (pythonStatus.status === 'ready' || pythonStatus.installedVersion) {
+  if ((pythonStatus.status === 'ready' || pythonStatus.installedVersion) && fs.existsSync(venvPythonPath) && fs.existsSync(venvConfigPath)) {
     try {
-      const wxOut = execSync(`"${getVenvPython()}" -c "import whisperx; print(whisperx.__version__)" 2>&1`, {
+      const wxOut = execSync(`"${venvPythonPath}" -c "import whisperx; print(whisperx.__version__)" 2>&1`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
         timeout: 4000,
@@ -1108,18 +1096,29 @@ function checkBaseRequirements(): RequirementsReport {
   const needsAttention = components.filter(c => c.classification === 'required' && c.status !== 'ready');
   const availableUpdates = components.filter(c => c.isAppManaged && c.updateAvailable);
 
-  components.forEach(c => {
-    c.status = 'ready';
-    c.error = undefined;
-  });
+  const allReady = needsAttention.length === 0;
+  const hwInfo = getHardwareInfo();
+  
+  let statusColor: 'red' | 'yellow' | 'green' = 'red';
+  if (!allReady) {
+    statusColor = 'red';
+  } else if (hwInfo.mode === 'gpu') {
+    statusColor = 'green';
+  } else {
+    statusColor = 'yellow';
+  }
 
-  const allReady = true;
-  const summaryMessage = 'All required components are installed and ready.';
+  const summaryMessage = statusColor === 'green'
+    ? 'All required components are installed and ready with GPU acceleration.'
+    : statusColor === 'yellow'
+      ? 'CPU requirements met. GPU acceleration is not available (Whisper transcription will be slower).'
+      : `Attention required: ${needsAttention.length} required components are missing or broken.`;
 
   return {
     timestamp: new Date().toISOString(),
     allReady,
-    needsAttentionCount: 0,
+    statusColor,
+    needsAttentionCount: needsAttention.length,
     summaryMessage,
     hardware: hw,
     components,
@@ -1154,6 +1153,8 @@ app.post('/api/requirements/install-repair', async (req, res) => {
 
   const report = checkBaseRequirements();
   const componentsToFix = report.components.filter(c => c.classification === 'required' && c.status !== 'ready');
+
+  console.log(`[Repair] Components to fix: ${componentsToFix.map(c => c.id).join(', ')}`);
 
   if (componentsToFix.length === 0) {
     return res.json({
@@ -1236,8 +1237,10 @@ app.post('/api/requirements/install-repair', async (req, res) => {
                  if (activeInstallProgress.logs.length > 50) activeInstallProgress.logs.shift();
              };
 
-             // Create venv if it doesn't exist
-             if (!fs.existsSync(VENV_DIR)) {
+             // Create venv if it doesn't exist or is invalid
+             const venvPythonExec = getVenvPython();
+             const venvConfigPath = path.join(VENV_DIR, "pyvenv.cfg");
+             if (!fs.existsSync(VENV_DIR) || !fs.existsSync(venvPythonExec) || !fs.existsSync(venvConfigPath)) {
                  logFn(`Creating isolated application runtime at ${VENV_DIR}...`);
                  let pyExe = 'python';
                  try {
@@ -1255,23 +1258,34 @@ app.post('/api/requirements/install-repair', async (req, res) => {
                          }
                      }
                  }
-                 await runSpawnCmd(pyExe, ['-m', 'venv', `"${VENV_DIR}"`], logFn);
+                 await runSpawnCmd(pyExe, ['-m', 'venv', VENV_DIR], logFn);
              }
              
-             const venvPython = getVenvPython();
+             const finalPythonExec = getVenvPython();
+             const finalPipExec = getVenvPip();
              
-             // Base dependencies + PyTorch
-             let torchArgs = ['-m', 'pip', 'install', 'torch', 'torchvision', 'torchaudio'];
-             if (hw.recommendedPyTorchFlavor === 'cuda') {
-                 torchArgs.push('--index-url', 'https://download.pytorch.org/whl/cu118');
+             // 1. Upgrade pip first
+             logFn("Upgrading private pip instance...");
+             await runSpawnCmd(finalPythonExec, ['-m', 'pip', 'install', '--upgrade', 'pip'], logFn);
+
+             // 2. Base dependencies + PyTorch (CUDA 12.4 for modern Windows support)
+             const flavor = hw.recommendedPyTorchFlavor;
+             let torchArgs = ['install', 'torch', 'torchvision', 'torchaudio'];
+             if (flavor === 'cuda') {
+                 torchArgs.push('--index-url', 'https://download.pytorch.org/whl/cu124');
              }
              
              logFn(`Installing PyTorch backend (${flavor})... This may take several minutes.`);
-             await runSpawnCmd(`"${venvPython}"`, torchArgs, logFn);
+             try {
+                await runSpawnCmd(finalPipExec, torchArgs, logFn);
+             } catch (err: any) {
+                logFn(`Warning: GPU-optimized install failed (likely version mismatch). Falling back to standard install...`);
+                await runSpawnCmd(finalPipExec, ['install', 'torch', 'torchvision', 'torchaudio'], logFn);
+             }
              
-             // WhisperX
+             // 3. WhisperX
              logFn(`Installing WhisperX into private runtime...`);
-             await runSpawnCmd(`"${venvPython}"`, ['-m', 'pip', 'install', 'whisperx'], logFn);
+             await runSpawnCmd(finalPipExec, ['install', 'whisperx'], logFn);
              
              activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Successfully configured private transcription engine.`);
           } catch (err: any) {
@@ -1377,7 +1391,7 @@ app.post('/api/step1/cancel', (req, res) => {
   activeStep1ProgressState.isCancelling = true;
   activeStep1ProgressState.canCancel = false;
   activeStep1ProgressState.liveStatusMessage = 'Cancelling processing... Safely preserving existing project files and cleaning up intermediate buffers.';
-  activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] User clicked Cancel Processing. Safe shutdown in progress.`);
+  logStep1(`User clicked Cancel Processing. Safe shutdown in progress.`);
 
   if (activeStep1Timer) {
     clearTimeout(activeStep1Timer);
@@ -1389,7 +1403,7 @@ app.post('/api/step1/cancel', (req, res) => {
     activeStep1ProgressState.isCancelling = false;
     activeStep1ProgressState.stage = 'cancelled';
     activeStep1ProgressState.liveStatusMessage = 'Processing was cancelled. Your source audio files and saved project data remain untouched.';
-    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Processing cancelled safely. Any partial working files can be removed anytime via Purge.`);
+    logStep1(`Processing cancelled safely. Any partial working files can be removed anytime via Purge.`);
   }, 400);
 
   res.json({ status: 'ok', message: 'Cancellation signal sent.' });
@@ -2444,6 +2458,7 @@ app.post('/api/youtube/download', (req, res) => {
         });
 
         updatedJob = job;
+        saveJobs();
       }
     }
 
@@ -2543,6 +2558,7 @@ app.post('/api/jobs', (req, res) => {
   };
 
   jobs.unshift(newJob);
+  saveJobs();
   res.status(201).json(newJob);
 });
 
@@ -2553,6 +2569,40 @@ app.get('/api/jobs/:id', (req, res) => {
     return res.status(404).json({ error: 'Job not found' });
   }
   res.json(job);
+});
+
+// Delete job
+app.delete('/api/jobs/:id', (req, res) => {
+  const index = jobs.findIndex(j => j.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  const job = jobs[index];
+  
+  // Cleanup files in inputs/[jobId]
+  const jobUploadDir = path.join(uploadDir, job.id);
+  if (fs.existsSync(jobUploadDir)) {
+    try {
+      fs.rmSync(jobUploadDir, { recursive: true, force: true });
+    } catch (e) {
+      console.error(`Failed to cleanup upload dir for ${job.id}:`, e);
+    }
+  }
+
+  // Also cleanup audiobooks/[jobId] if it exists
+  const jobProcessDir = path.join(process.cwd(), 'audiobooks', job.id);
+  if (fs.existsSync(jobProcessDir)) {
+    try {
+      fs.rmSync(jobProcessDir, { recursive: true, force: true });
+    } catch (e) {
+      console.error(`Failed to cleanup process dir for ${job.id}:`, e);
+    }
+  }
+
+  jobs.splice(index, 1);
+  saveJobs();
+  res.json({ status: 'ok' });
 });
 
 // Step 1: Save Step 1 Options & Settings
@@ -2590,11 +2640,20 @@ app.post('/api/jobs/:id/step1-settings', (req, res) => {
     job.totalSizeBytes = job.parts.reduce((acc, p) => acc + p.sizeBytes, 0);
   }
 
+  saveJobs();
   res.json({ status: 'ok', job });
 });
 
+const logStep1 = (msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const formatted = `[${timestamp}] ${msg}`;
+    activeStep1ProgressState.logs.push(formatted);
+    console.log(`[Step1: ${jobIdForStep1 || 'Global'}] ${formatted}`);
+};
+
 // Step 1: Process Step 1 (Supports both 'whisperx' and 'existing_files' workflows)
 const handleStep1Process = async (req: any, res: any) => {
+  jobIdForStep1 = req.params.id;
   const job = jobs.find(j => j.id === req.params.id);
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
@@ -2681,7 +2740,7 @@ const handleStep1Process = async (req: any, res: any) => {
     activeStep1ProgressState.percentage = 45;
     activeStep1ProgressState.label = 'Extracting existing file durations & chapter tags';
     activeStep1ProgressState.currentTask = 'Reading durations and metadata from individual audio tracks';
-    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Probing ${job.parts.length} files with FFprobe...`);
+    logStep1(`Probing ${job.parts.length} files with FFprobe...`);
 
     job.logs.push({
       timestamp: now(),
@@ -2726,7 +2785,7 @@ const handleStep1Process = async (req: any, res: any) => {
       bitrate: maxBitrate,
       sizeBytes: Math.round(job.totalSizeBytes * 0.98),
     };
-    job.ffmetaContent = generateFFMetadata(directChapters, Math.round(cumulativeSec * 1000), job.metadata);
+    job.ffmetaContent = generateFFMetaContent(directChapters, cumulativeSec, job.metadata);
 
     activeStep1ProgressState.stage = 'completed';
     activeStep1ProgressState.currentStageNumber = 3;
@@ -2743,7 +2802,7 @@ const handleStep1Process = async (req: any, res: any) => {
       wordsTranscribed: 0,
       modelUsed: 'Direct File Preservation (Bypassed Whisper)',
     };
-    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Step 1 complete. ${directChapters.length} chapters mapped in natural sequence.`);
+    logStep1(`Step 1 complete. ${directChapters.length} chapters mapped in natural sequence.`);
 
     job.logs.push({
       timestamp: now(),
@@ -2780,7 +2839,7 @@ const handleStep1Process = async (req: any, res: any) => {
   activeStep1ProgressState.percentage = 20;
   activeStep1ProgressState.label = 'Inspecting audio stream codecs & sample rates';
   activeStep1ProgressState.currentTask = `Probing ${job.parts.length} files with FFprobe`;
-  activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] FFprobe stream inspection: All files conform to audio standards.`);
+  logStep1(`FFprobe stream inspection: All files conform to audio standards.`);
 
   // Stage 3: Merging audio
   activeStep1ProgressState.stage = 'merging';
@@ -2788,7 +2847,7 @@ const handleStep1Process = async (req: any, res: any) => {
   activeStep1ProgressState.percentage = 38;
   activeStep1ProgressState.label = mergeMethod === 'quick' ? 'Stitching audio tracks (Quick Stream-Copy)' : 'Standardizing & Stitching PCM Audio';
   activeStep1ProgressState.currentTask = `Processing audio sequence: ${job.parts.length} files...`;
-  activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Merge mode: ${mergeMethod === 'quick' ? 'Quick Concatenation' : 'Standard PCM Re-encoding'}`);
+  logStep1(`Merge mode: ${mergeMethod === 'quick' ? 'Quick Concatenation' : 'Standard PCM Re-encoding'}`);
 
   // 1. Audio Merge Method
   const maxBitrate = Math.max(...job.parts.map(p => p.bitrate || 128), 128);
@@ -2827,9 +2886,9 @@ const handleStep1Process = async (req: any, res: any) => {
   }
   
   if (missingFiles.length > 0) {
-      const err = new Error(`Missing source audio files:\n${missingFiles.join('\n')}\n\nTIP: If you used the browser's "Select Folder" button for a folder outside the workspace, the server cannot access it. Please paste the FULL ABSOLUTE PATH (e.g., C:\\Audiobooks\\LUE) into the "Scan Directory" text box instead!`);
+      const err = new Error(`Missing source audio files:\n${missingFiles.join('\n')}`);
       console.error(err.message);
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] ERROR: ${err.message}`);
+      logStep1(`ERROR: ${err.message}`);
       activeStep1ProgressState.isActive = false;
       activeStep1ProgressState.error = err.message;
       return;
@@ -2854,7 +2913,7 @@ const handleStep1Process = async (req: any, res: any) => {
       await execFileAsync('ffmpeg', args, { cwd: concatDir });
   } catch (err: any) {
       console.error("FFmpeg merge error:", err);
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] FFmpeg Error: ${err.message}`);
+      logStep1(`FFmpeg Error: ${err.message}`);
       activeStep1ProgressState.isActive = false;
       activeStep1ProgressState.error = `FFmpeg Merge Error: ${err.message}`;
       return;
@@ -2870,10 +2929,10 @@ const handleStep1Process = async (req: any, res: any) => {
           if (probeData?.format?.size) realSizeBytes = parseInt(probeData.format.size, 10);
       } catch(err: any) {
           console.error("FFprobe error:", err);
-          activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] FFprobe Error: ${err.message}`);
+          logStep1(`FFprobe Error: ${err.message}`);
       }
   } else {
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Merged audio file was not created. Skipping FFprobe.`);
+      logStep1(`Merged audio file was not created. Skipping FFprobe.`);
   }
 
   job.mergedMp3 = {
@@ -2886,14 +2945,14 @@ const handleStep1Process = async (req: any, res: any) => {
 
   // CLEANUP: Purge the original input files from the internal inputs folder to save disk space
   if (job.sourceFolderPath && job.sourceFolderPath.includes('inputs')) {
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Cleaning up temporary input files from workspace...`);
+      logStep1(`Cleaning up temporary input files from workspace...`);
       for (const part of job.parts) {
           const p = path.resolve(process.cwd(), job.sourceFolderPath, part.name);
           if (fs.existsSync(p)) {
               try { fs.unlinkSync(p); } catch(e) {}
           }
       }
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Cleared ${job.parts.length} source files to free disk space.`);
+      logStep1(`Cleared ${job.parts.length} source files to free disk space.`);
   }
 
   if (mergeMethod === 'quick') {
@@ -2916,7 +2975,7 @@ const handleStep1Process = async (req: any, res: any) => {
   activeStep1ProgressState.percentage = 62;
   activeStep1ProgressState.label = `Transcribing speech with WhisperX (${model.name})`;
   activeStep1ProgressState.currentTask = `Neural speech recognition running on ${hw.mode === 'gpu' ? 'NVIDIA GPU (CUDA)' : 'CPU'}...`;
-  activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Initialized Whisper model: ${model.name} (${model.id})`);
+  logStep1(`Initialized Whisper model: ${model.name} (${model.id})`);
 
   job.transcription = {
     model: model.name,
@@ -2946,19 +3005,19 @@ const handleStep1Process = async (req: any, res: any) => {
   try {
     if (!fs.existsSync(mergedFilePath)) {
         const errorMsg = "Cannot run WhisperX because the merged audio file was not successfully created.";
-        activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] ERROR: ${errorMsg}`);
+        logStep1(`ERROR: ${errorMsg}`);
         activeStep1ProgressState.isActive = false;
         activeStep1ProgressState.error = errorMsg;
         return;
     }
     
-    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Executing local WhisperX on merged audio...`);
+    logStep1(`Executing local WhisperX on merged audio...`);
     
     const deviceFlag = hw.mode === 'gpu' ? ['--device', 'cuda', '--compute_type', 'float16'] : ['--device', 'cpu', '--compute_type', 'int8'];
     
     const venvPython = getVenvPython();
     if (!fs.existsSync(venvPython)) {
-        throw new Error("Private WhisperX runtime not found. Please click the Settings gear and use Install / Repair.");
+        throw new Error("Private WhisperX runtime not found. Please click the Settings gear icon, go to 'System Requirements', and click 'Install / Repair' to set up the local transcription engine.");
     }
     
     // Build the WhisperX command array
@@ -2972,7 +3031,7 @@ const handleStep1Process = async (req: any, res: any) => {
        "--output_format", "json"
     ];
     
-    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Running: ${venvPython} ${whisperArgs.join(' ')}`);
+    logStep1(`Running: ${venvPython} ${whisperArgs.join(' ')}`);
     
     // Execute the local WhisperX via the private runtime asynchronously
     await execFileAsync(venvPython, whisperArgs);
@@ -3007,20 +3066,20 @@ const handleStep1Process = async (req: any, res: any) => {
           });
         }
       }
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Local WhisperX successfully extracted ${generatedCandidates.length} chapters.`);
+      logStep1(`Local WhisperX successfully extracted ${generatedCandidates.length} chapters.`);
     } else {
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] WhisperX completed but JSON output was not found.`);
+      logStep1(`WhisperX completed but JSON output was not found.`);
     }
   } catch (err: any) {
-    console.error("Local Transcription Error:", err);
+    console.error("Local WhisperX Execution Error:", err);
     if (err.message && err.message.includes("No module named whisperx")) {
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] WARNING: Private WhisperX module not found!`);
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] -> The actual WhisperX Python software is missing from the private runtime.`);
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] -> Please click the "Settings Gear" icon, go to "System Requirements", and click "Install / Repair" to install WhisperX.`);
+      logStep1(`WARNING: Private WhisperX module not found!`);
+      logStep1(`-> The actual WhisperX Python software is missing from the private runtime.`);
+      logStep1(`-> Please click the "Settings Gear" icon, go to "System Requirements", and click "Install / Repair" to install WhisperX.`);
     } else {
-      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] WhisperX Execution Error: ${err.message}.`);
+      logStep1(`WhisperX Execution Error: ${err.message}.`);
     }
-    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Falling back to mock chapter boundaries.`);
+    logStep1(`Falling back to mock chapter boundaries.`);
   }
 
   // Fallback if WhisperX wasn't installed, failed, or returned empty results
@@ -3087,6 +3146,8 @@ const handleStep1Process = async (req: any, res: any) => {
     message: `Step 1 Complete. Extracted ${generatedCandidates.length} candidate chapter markers. Ready for Step 2 human review.`,
   });
 
+  saveJobs();
+
   // Stage 6: Completed
   activeStep1ProgressState.stage = 'completed';
   activeStep1ProgressState.currentStageNumber = 6;
@@ -3103,7 +3164,7 @@ const handleStep1Process = async (req: any, res: any) => {
     wordsTranscribed: job.transcription.wordsCount,
     modelUsed: model.name,
   };
-  activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Completed Step 1 processing in ${Math.round((Date.now() - activeStep1StartTime) / 1000)}s.`);
+  logStep1(`Completed Step 1 processing in ${Math.round((Date.now() - activeStep1StartTime) / 1000)}s.`);
   
   } catch (err: any) {
     console.error("Fatal Step 1 Background Error:", err);
@@ -3307,6 +3368,8 @@ app.post('/api/jobs/:id/metadata', (req, res) => {
     job.status = 'metadata_ready';
   }
 
+  saveJobs();
+
   job.logs.push({
     timestamp: now,
     level: 'INFO',
@@ -3399,6 +3462,7 @@ app.post('/api/jobs/:id/build-m4b', (req, res) => {
   };
 
   job.status = 'built';
+  saveJobs();
   const coverMsg = job.metadata?.cover ? ` Attached cover art (${job.metadata.cover.source}).` : '';
   const narratorMsg = job.metadata?.narrator ? ` Stored narrator "${job.metadata.narrator}" in metadata Composer tag.` : '';
   const deadAirTrimMs = parseTimestampToMs(job.chapters[0].start);
@@ -3467,6 +3531,7 @@ app.post('/api/jobs/:id/validate', (req, res) => {
   };
 
   job.status = 'validated';
+  saveJobs();
   job.logs.push({
     timestamp: now(),
     level: status === 'FAIL' ? 'ERROR' : status === 'WARNING' ? 'WARNING' : 'INFO',
@@ -3498,6 +3563,7 @@ app.post('/api/jobs/:id/purge', (req, res) => {
     job.transcription = null;
     job.parts = [];
     job.status = job.outputM4b ? 'built' : 'draft';
+    saveJobs();
     job.logs.push({
       timestamp: now(),
       level: 'WARNING',
@@ -3511,6 +3577,7 @@ app.post('/api/jobs/:id/purge', (req, res) => {
     job.mergedMp3 = null;
     job.transcription = null;
     job.status = job.outputM4b ? 'built' : 'draft';
+    saveJobs();
     job.logs.push({
       timestamp: now(),
       level: 'INFO',

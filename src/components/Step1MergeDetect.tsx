@@ -71,7 +71,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
 }) => {
   // Folder & Files State (persisted on job where available)
   const [sourceFolderPath, setSourceFolderPath] = useState<string>(
-    job.sourceFolderPath || 'audiobooks/Dune'
+    job.sourceFolderPath || ''
   );
   const [discoveredFiles, setDiscoveredFiles] = useState<DiscoveredMp3File[]>(
     job.discoveredFiles ||
@@ -318,62 +318,53 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
         filesToUpload.forEach(f => formData.append('files', f));
 
         setUploadProgressState(`Uploading ${filesToUpload.length} files to internal workspace...`);
-        const res = await fetch('/api/upload-audio', {
+        const res = await fetch(`/api/upload-audio?jobId=${job.id}`, {
             method: 'POST',
             body: formData,
         });
 
         if (!res.ok) throw new Error('Failed to upload files');
         const data = await res.json();
-        const uploadedMap = new Map(data.files.map((f: any) => [f.originalName, f.filename]));
+        
+        // Use the server-side filenames and metadata directly
+        const sortedUploadedFiles = naturalSort(data.files, (f: any) => f.originalName);
 
-        const audioFiles: DiscoveredMp3File[] = [];
-        const chapterFolders = new Set<string>();
+        const audioFiles: DiscoveredMp3File[] = sortedUploadedFiles.map((f: any) => {
+          // Flatten folder name for the UI display, but keep original for sorting context if needed
+          const pathParts = f.originalName.split(/[/\\]/);
+          const folderName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : 'Root';
+          const chapterGroup = pathParts.length > 2 ? pathParts.slice(0, -1).join('/') : undefined;
 
-        filesToUpload.forEach(file => {
-          const relPath = file.webkitRelativePath || file.name;
-          const pathParts = relPath.split('/');
-          let chapterGroup: string | undefined = undefined;
-          let folderName = 'Root';
-
-          if (pathParts.length > 2) {
-            chapterGroup = pathParts.slice(1, -1).join('/');
-            folderName = pathParts[pathParts.length - 2];
-            chapterFolders.add(chapterGroup);
-          } else if (pathParts.length === 2) {
-            folderName = pathParts[0];
-          }
-
-          const dur = Math.max(30, Math.round(file.size / 16000));
-          const safeName = (uploadedMap.get(file.name) as string) || file.name;
-
-          audioFiles.push({
-            relativePath: relPath,
-            fileName: safeName,
-            folderName,
-            chapterGroup,
-            sizeBytes: file.size,
-            durationSeconds: dur,
-          });
+          return {
+            relativePath: f.originalName,
+            fileName: f.filename,
+            folderName: folderName,
+            chapterGroup: chapterGroup,
+            sizeBytes: f.size,
+            durationSeconds: f.durationSeconds || Math.max(30, Math.round(f.size / 16000)),
+          };
         });
 
-        const sorted = naturalSort(audioFiles, (f) => f.relativePath);
+        const chapterFolders = new Set<string>();
+        audioFiles.forEach(af => {
+            if (af.chapterGroup) chapterFolders.add(af.chapterGroup);
+        });
 
         setFolderScanError(null);
         setSourceFolderPath(data.uploadDir); 
         
-        setDiscoveredFiles(sorted);
+        setDiscoveredFiles(audioFiles);
         setHasNestedChapters(chapterFolders.size > 0);
         setInputMethod('folder');
         
         notifyJobUpdate({
             inputMethod: 'folder',
             sourceFolderPath: data.uploadDir,
-            discoveredFiles: sorted,
+            discoveredFiles: audioFiles,
             hasNestedChapterFolders: chapterFolders.size > 0,
-            parts: sorted.map((f, idx) => ({
+            parts: audioFiles.map((f, idx) => ({
                 id: `p-${idx + 1}`,
-                name: f.fileName,
+                name: f.fileName, // Use the flat filename saved by the server
                 sizeBytes: f.sizeBytes,
                 durationSeconds: f.durationSeconds,
                 bitrate: 128,

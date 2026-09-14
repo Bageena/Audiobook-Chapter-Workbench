@@ -178,6 +178,25 @@ export const RequirementsModal: React.FC<RequirementsModalProps> = ({ onClose })
 
         {/* Scrollable Content Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-stone-800 text-xs">
+          {/* Summary Banner */}
+          {report && report.statusColor !== 'green' && (
+            <div className={`p-3 rounded-lg border flex items-start space-x-3 ${
+              report.statusColor === 'red' 
+                ? 'bg-red-50 border-red-200 text-red-800' 
+                : 'bg-amber-50 border-amber-200 text-amber-800'
+            }`}>
+              {report.statusColor === 'red' ? (
+                <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              ) : (
+                <Zap className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              )}
+              <div className="space-y-1">
+                <p className="font-bold text-xs uppercase tracking-tight">System Status: {report.statusColor === 'red' ? 'Critical' : 'Optimized for CPU'}</p>
+                <p className="text-[11px] leading-relaxed opacity-90">{report.summaryMessage}</p>
+              </div>
+            </div>
+          )}
+
           {/* Local Security & Policy Banner */}
           <div className="p-3 bg-stone-50 border border-stone-200 rounded-lg flex items-start space-x-3">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
@@ -402,14 +421,19 @@ export const RequirementsModal: React.FC<RequirementsModalProps> = ({ onClose })
         {/* Footer Actions */}
         <div className="px-6 py-3.5 bg-stone-50 border-t border-stone-200 flex items-center justify-between">
           <div className="text-xs text-stone-500">
-            {report?.allReady ? (
+            {report?.statusColor === 'green' ? (
               <span className="text-emerald-700 font-medium flex items-center space-x-1">
                 <CheckCircle2 className="w-3.5 h-3.5 inline text-emerald-600" />
-                <span>All core requirements verified.</span>
+                <span>GPU Acceleration Ready.</span>
+              </span>
+            ) : report?.statusColor === 'yellow' ? (
+              <span className="text-amber-700 font-medium flex items-center space-x-1">
+                <Zap className="w-3.5 h-3.5 inline text-amber-600" />
+                <span>CPU Ready (GPU Missing).</span>
               </span>
             ) : (
-              <span className="text-amber-700 font-medium flex items-center space-x-1">
-                <AlertTriangle className="w-3.5 h-3.5 inline text-amber-600" />
+              <span className="text-red-700 font-medium flex items-center space-x-1">
+                <AlertTriangle className="w-3.5 h-3.5 inline text-red-600" />
                 <span>{report?.needsAttentionCount || 0} component(s) need attention.</span>
               </span>
             )}
