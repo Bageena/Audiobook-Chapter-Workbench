@@ -108,8 +108,28 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'Step 1 failed');
+      
+      if (data.status === 'started') {
+         // Wait for the background process to finish by polling
+         while (true) {
+            await new Promise(r => setTimeout(r, 1000));
+            const pRes = await fetch('/api/step1/progress');
+            if (pRes.ok) {
+               const prog = await pRes.json();
+               if (!prog.isActive) {
+                   if (prog.error) {
+                       throw new Error(prog.error);
+                   }
+                   if (prog.stage === 'completed') {
+                       break;
+                   }
+               }
+            }
+         }
+      }
+
       await refreshCurrentJob(currentJob.id);
-      setActiveStep(2);
+      // Wait for the user to manually click 'Continue to Review' if they are on Step 1
     } catch (err: any) {
       alert(`Step 1 Error: ${err.message}`);
     } finally {

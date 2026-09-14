@@ -16,7 +16,7 @@ import { YouTubeAudioImport } from './YouTubeAudioImport';
 import { Step1ProgressPanel } from './Step1ProgressPanel';
 import { Step1ProcessState } from '../types';
 import {
-  FolderOpen,
+  Loader2, FolderOpen,
   FolderCheck,
   FileAudio,
   Layers,
@@ -289,75 +289,106 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
   const AUDIO_EXTENSIONS_REGEX = /\.(mp3|m4a|aac|m4b|ogg|oga|opus|flac|wav|aiff|aif|wma)$/i;
 
   // Handle native folder picker selection (webkitdirectory)
-  const handleNativeFolderSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [uploadProgressState, setUploadProgressState] = useState('');
+
+  const handleNativeFolderSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = event.target.files;
     if (!fileList || fileList.length === 0) return;
 
-    const audioFiles: DiscoveredMp3File[] = [];
-    const chapterFolders = new Set<string>();
-
+    const filesToUpload: File[] = [];
     for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (AUDIO_EXTENSIONS_REGEX.test(file.name)) {
-        const relPath = file.webkitRelativePath || file.name;
-        const pathParts = relPath.split('/');
-        let chapterGroup: string | undefined = undefined;
-        let folderName = 'Root';
-
-        if (pathParts.length > 2) {
-          // Layout B: e.g. Audiobook/Chapters/Chapter 01/01.mp3 or Audiobook/Chapter 01/01.mp3
-          chapterGroup = pathParts.slice(1, -1).join('/');
-          folderName = pathParts[pathParts.length - 2];
-          chapterFolders.add(chapterGroup);
-        } else if (pathParts.length === 2) {
-          folderName = pathParts[0];
+        if (AUDIO_EXTENSIONS_REGEX.test(fileList[i].name)) {
+            filesToUpload.push(fileList[i]);
         }
-
-        // Estimate duration based on size (128kbps ~ 16KB/s)
-        const dur = Math.max(30, Math.round(file.size / 16000));
-
-        audioFiles.push({
-          relativePath: relPath,
-          fileName: file.name,
-          folderName,
-          chapterGroup,
-          sizeBytes: file.size,
-          durationSeconds: dur,
-        });
-      }
     }
 
-    if (audioFiles.length === 0) {
-      setFolderScanError('No supported audio files (.mp3, .m4a, .m4b, .flac, .ogg, .opus, .wav, .aac, .aiff, .wma) were found in the selected folder.');
+    if (filesToUpload.length === 0) {
+      setFolderScanError('No supported audio files were found in the selected folder.');
       setDiscoveredFiles([]);
       return;
     }
 
-    // Natural sort: Chapter 2 before Chapter 10
-    const sorted = naturalSort(audioFiles, (f) => f.relativePath);
-    const rootFolderName = fileList[0]?.webkitRelativePath?.split('/')[0] || 'Selected Folder';
+    setIsUploadingFiles(true);
+    setUploadProgressState('Preparing upload...');
+    
+    try {
+        const formData = new FormData();
+        filesToUpload.forEach(f => formData.append('files', f));
 
-    setFolderScanError(null);
-    setSourceFolderPath(rootFolderName);
-    setDiscoveredFiles(sorted);
-    setHasNestedChapters(chapterFolders.size > 0);
-    setInputMethod('folder');
+        setUploadProgressState(`Uploading ${filesToUpload.length} files to internal workspace...`);
+        const res = await fetch('/api/upload-audio', {
+            method: 'POST',
+            body: formData,
+        });
 
-    notifyJobUpdate({
-      inputMethod: 'folder',
-      sourceFolderPath: rootFolderName,
-      discoveredFiles: sorted,
-      hasNestedChapterFolders: chapterFolders.size > 0,
-      parts: sorted.map((f, idx) => ({
-        id: `p-${idx + 1}`,
-        name: f.fileName,
-        sizeBytes: f.sizeBytes,
-        durationSeconds: f.durationSeconds,
-        bitrate: 128,
-        order: idx + 1,
-      })),
-    });
+        if (!res.ok) throw new Error('Failed to upload files');
+        const data = await res.json();
+        const uploadedMap = new Map(data.files.map((f: any) => [f.originalName, f.filename]));
+
+        const audioFiles: DiscoveredMp3File[] = [];
+        const chapterFolders = new Set<string>();
+
+        filesToUpload.forEach(file => {
+          const relPath = file.webkitRelativePath || file.name;
+          const pathParts = relPath.split('/');
+          let chapterGroup: string | undefined = undefined;
+          let folderName = 'Root';
+
+          if (pathParts.length > 2) {
+            chapterGroup = pathParts.slice(1, -1).join('/');
+            folderName = pathParts[pathParts.length - 2];
+            chapterFolders.add(chapterGroup);
+          } else if (pathParts.length === 2) {
+            folderName = pathParts[0];
+          }
+
+          const dur = Math.max(30, Math.round(file.size / 16000));
+          const safeName = (uploadedMap.get(file.name) as string) || file.name;
+
+          audioFiles.push({
+            relativePath: relPath,
+            fileName: safeName,
+            folderName,
+            chapterGroup,
+            sizeBytes: file.size,
+            durationSeconds: dur,
+          });
+        });
+
+        const sorted = naturalSort(audioFiles, (f) => f.relativePath);
+
+        setFolderScanError(null);
+        setSourceFolderPath(data.uploadDir); 
+        
+        setDiscoveredFiles(sorted);
+        setHasNestedChapters(chapterFolders.size > 0);
+        setInputMethod('folder');
+        
+        notifyJobUpdate({
+            inputMethod: 'folder',
+            sourceFolderPath: data.uploadDir,
+            discoveredFiles: sorted,
+            hasNestedChapterFolders: chapterFolders.size > 0,
+            parts: sorted.map((f, idx) => ({
+                id: `p-${idx + 1}`,
+                name: f.fileName,
+                sizeBytes: f.sizeBytes,
+                durationSeconds: f.durationSeconds,
+                bitrate: 128,
+                order: idx + 1,
+            }))
+        });
+
+    } catch (e: any) {
+        setFolderScanError(e.message || 'Upload failed');
+    } finally {
+        setIsUploadingFiles(false);
+        setUploadProgressState('');
+    }
   };
+
 
   // Scan folder by path on local filesystem
   const handleScanLocalPath = async (pathToScan: string) => {
@@ -392,7 +423,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
         hasNestedChapterFolders: data.hasNestedChapterFolders,
         parts: data.files.map((f, idx) => ({
           id: `p-${idx + 1}`,
-          name: f.fileName,
+          name: f.relativePath || f.fileName,
           sizeBytes: f.sizeBytes,
           durationSeconds: f.durationSeconds,
           bitrate: 128,
@@ -684,7 +715,7 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
       outputFolderPath,
       parts: discoveredFiles.map((f, idx) => ({
         id: `p-${idx + 1}`,
-        name: f.fileName,
+        name: f.relativePath || f.fileName,
         sizeBytes: f.sizeBytes,
         durationSeconds: f.durationSeconds,
         bitrate: 128,
@@ -982,6 +1013,12 @@ export const Step1MergeDetect: React.FC<Step1Props> = ({
           </div>
         )}
 
+        {isUploadingFiles && (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 flex items-center space-x-2">
+            <Loader2 className="w-4 h-4 shrink-0 animate-spin text-blue-600" />
+            <span className="font-medium">{uploadProgressState}</span>
+          </div>
+        )}
         {/* Inline Folder Validation Message */}
         {folderScanError && (
           <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center space-x-2">

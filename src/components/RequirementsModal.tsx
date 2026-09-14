@@ -30,6 +30,7 @@ export const RequirementsModal: React.FC<RequirementsModalProps> = ({ onClose })
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [progressState, setProgressState] = useState<InstallRepairProgress | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [showFullLogs, setShowFullLogs] = useState<boolean>(false);
 
   // Load status
@@ -37,6 +38,7 @@ export const RequirementsModal: React.FC<RequirementsModalProps> = ({ onClose })
     if (isRefreshAction) setIsRefreshing(true);
     else setIsLoading(true);
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     try {
       const res = await fetch('/api/requirements/status');
@@ -82,10 +84,17 @@ export const RequirementsModal: React.FC<RequirementsModalProps> = ({ onClose })
   // Trigger Install / Repair
   const handleInstallRepair = async () => {
     setErrorMsg(null);
+    setSuccessMsg(null);
     try {
       const res = await fetch('/api/requirements/install-repair', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to start installation/repair.');
+      
+      if (data.status === 'ok' && data.message && data.message.includes('No installation needed')) {
+        setSuccessMsg(data.message);
+        return;
+      }
+      
       // Fetch progress immediately
       const progRes = await fetch('/api/requirements/install-progress');
       if (progRes.ok) {
@@ -284,6 +293,14 @@ export const RequirementsModal: React.FC<RequirementsModalProps> = ({ onClose })
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-start space-x-2">
               <XCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Success Message if any */}
+          {successMsg && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex items-start space-x-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <span>{successMsg}</span>
             </div>
           )}
 

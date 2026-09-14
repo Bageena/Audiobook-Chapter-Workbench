@@ -113,10 +113,15 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Wrench className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Requirements</span>
-            {hasRequirementsWarning && (
+            {hasRequirementsWarning ? (
               <span className="flex h-2 w-2 relative -mr-0.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+              </span>
+            ) : (
+              <span className="flex h-2 w-2 relative -mr-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
             )}
           </button>

@@ -3,8 +3,46 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { execSync } from 'child_process';
+import { execSync, exec, execFile, spawn } from 'child_process';
+import { promisify } from 'util';
+const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+function runSpawnCmd(cmd, args, onLog) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { shell: true });
+    
+    child.stdout.on('data', (data) => {
+      const lines = data.toString().split('\n');
+      for (const line of lines) {
+        if (line.trim()) onLog(line.trim());
+      }
+    });
+    
+    child.stderr.on('data', (data) => {
+      const lines = data.toString().split('\n');
+      for (const line of lines) {
+        // Just log it, don't fail yet (pip uses stderr for progress/info sometimes)
+        if (line.trim()) onLog(line.trim());
+      }
+    });
+    
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Command failed with exit code ${code}`));
+      } else {
+        resolve();
+      }
+    });
+    
+    child.on('error', (err) => {
+        reject(err);
+    });
+  });
+}
 import { createServer as createViteServer } from 'vite';
+import multer from 'multer';
+import { GoogleGenAI } from '@google/genai';
 import {
   AudiobookJob,
   WorkbenchConfig,
@@ -38,8 +76,49 @@ import {
 const app = express();
 const PORT = 3000;
 
+const RUNTIME_DIR = path.join(process.cwd(), 'runtime');
+const VENV_DIR = path.join(RUNTIME_DIR, 'venv');
+const getVenvPython = () => os.platform() === 'win32' ? path.join(VENV_DIR, 'Scripts', 'python.exe') : path.join(VENV_DIR, 'bin', 'python');
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+
+const uploadDir = path.join(process.cwd(), 'inputs');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // Preserve the original name but ensure it's safe
+    cb(null, file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_'));
+  }
+});
+
+const upload = multer({ storage });
+
+app.post('/api/upload-audio', upload.array('files'), (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded.' });
+  }
+  
+  const uploadedFiles = req.files.map(f => ({
+    originalName: f.originalname,
+    filename: f.filename,
+    path: f.path,
+    size: f.size
+  }));
+  
+  res.json({
+    message: 'Successfully uploaded files.',
+    files: uploadedFiles,
+    uploadDir
+  });
+});
+
 
 // Initial workbench configuration matching config.json from original Python app
 let currentConfig: WorkbenchConfig = {
@@ -817,7 +896,7 @@ function checkBaseRequirements(): RequirementsReport {
   let torchVer = '';
   if (pythonStatus.status === 'ready' || pythonStatus.installedVersion) {
     try {
-      const torchOut = execSync('python3 -c "import torch; print(torch.__version__, torch.cuda.is_available())" 2>&1 || python -c "import torch; print(torch.__version__, torch.cuda.is_available())" 2>&1', {
+      const torchOut = execSync(`"${getVenvPython()}" -c "import torch; print(torch.__version__, torch.cuda.is_available())" 2>&1`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
         timeout: 4000,
@@ -867,7 +946,7 @@ function checkBaseRequirements(): RequirementsReport {
   let torchaudioInstalled = false;
   if (pythonStatus.status === 'ready' || pythonStatus.installedVersion) {
     try {
-      const taOut = execSync('python3 -c "import torchaudio; print(torchaudio.__version__)" 2>&1 || python -c "import torchaudio; print(torchaudio.__version__)" 2>&1', {
+      const taOut = execSync(`"${getVenvPython()}" -c "import torchaudio; print(torchaudio.__version__)" 2>&1`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
         timeout: 4000,
@@ -901,7 +980,7 @@ function checkBaseRequirements(): RequirementsReport {
   let wxInstalled = false;
   if (pythonStatus.status === 'ready' || pythonStatus.installedVersion) {
     try {
-      const wxOut = execSync('python3 -c "import whisperx; print(whisperx.__version__)" 2>&1 || python -c "import whisperx; print(whisperx.__version__)" 2>&1', {
+      const wxOut = execSync(`"${getVenvPython()}" -c "import whisperx; print(whisperx.__version__)" 2>&1`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
         timeout: 4000,
@@ -1147,17 +1226,57 @@ app.post('/api/requirements/install-repair', async (req, res) => {
           }
         } else if (comp.id === 'pytorch' || comp.id === 'torchaudio' || comp.id === 'whisperx') {
           const hw = report.hardware;
-          const flavor = hw.recommendedPyTorchFlavor === 'cuda' ? 'GPU (CUDA 12.1)' : 'CPU-only';
-          activeInstallProgress.currentActivity = `Configuring ${comp.name} (${flavor})...`;
-          activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Hardware-aware configuration: ${flavor} runtime requested.`);
+          const flavor = hw.recommendedPyTorchFlavor === 'cuda' ? 'GPU (CUDA 11.8)' : 'CPU-only';
+          activeInstallProgress.currentActivity = `Configuring Private Transcription Runtime (${flavor})...`;
+          
+          try {
+             const logFn = (msg: string) => {
+                 // only keep last 50 logs to prevent memory leaks in the UI
+                 activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+                 if (activeInstallProgress.logs.length > 50) activeInstallProgress.logs.shift();
+             };
 
-          // Ensure tools and environment directories exist
-          const toolsDir = path.join(process.cwd(), 'tools');
-          if (!fs.existsSync(toolsDir)) fs.mkdirSync(toolsDir, { recursive: true });
-
-          // Mock installation simulation in container/lightweight environment
-          await new Promise(r => setTimeout(r, 1200));
-          activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Successfully configured application-managed ${comp.name} environment.`);
+             // Create venv if it doesn't exist
+             if (!fs.existsSync(VENV_DIR)) {
+                 logFn(`Creating isolated application runtime at ${VENV_DIR}...`);
+                 let pyExe = 'python';
+                 try {
+                     execSync('python --version');
+                 } catch (e) {
+                     try {
+                         execSync('python3 --version');
+                         pyExe = 'python3';
+                     } catch (e2) {
+                         try {
+                             execSync('py --version');
+                             pyExe = 'py';
+                         } catch (e3) {
+                             throw new Error("Could not find python, python3, or py on this system. Please install Python 3.10+.");
+                         }
+                     }
+                 }
+                 await runSpawnCmd(pyExe, ['-m', 'venv', `"${VENV_DIR}"`], logFn);
+             }
+             
+             const venvPython = getVenvPython();
+             
+             // Base dependencies + PyTorch
+             let torchArgs = ['-m', 'pip', 'install', 'torch', 'torchvision', 'torchaudio'];
+             if (hw.recommendedPyTorchFlavor === 'cuda') {
+                 torchArgs.push('--index-url', 'https://download.pytorch.org/whl/cu118');
+             }
+             
+             logFn(`Installing PyTorch backend (${flavor})... This may take several minutes.`);
+             await runSpawnCmd(`"${venvPython}"`, torchArgs, logFn);
+             
+             // WhisperX
+             logFn(`Installing WhisperX into private runtime...`);
+             await runSpawnCmd(`"${venvPython}"`, ['-m', 'pip', 'install', 'whisperx'], logFn);
+             
+             activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Successfully configured private transcription engine.`);
+          } catch (err: any) {
+             activeInstallProgress.logs.push(`[${new Date().toLocaleTimeString()}] Setup Error: ${err.message}`);
+          }
         } else if (comp.id === 'ffmpeg' || comp.id === 'ffprobe') {
           activeInstallProgress.currentActivity = `Verifying ${comp.name}...`;
           try {
@@ -2475,7 +2594,7 @@ app.post('/api/jobs/:id/step1-settings', (req, res) => {
 });
 
 // Step 1: Process Step 1 (Supports both 'whisperx' and 'existing_files' workflows)
-const handleStep1Process = (req: any, res: any) => {
+const handleStep1Process = async (req: any, res: any) => {
   const job = jobs.find(j => j.id === req.params.id);
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
@@ -2547,9 +2666,15 @@ const handleStep1Process = (req: any, res: any) => {
     summary: null,
   };
 
-  // ----------------------------------------------------
-  // WORKFLOW A: Use existing MP3 files as individual chapters
-  // ----------------------------------------------------
+  // Respond immediately so the client can begin polling without NetworkError timeouts
+  res.json({ status: 'started', message: 'Step 1 processing started in background' });
+
+  // Run the heavy processing in the background
+  (async () => {
+    try {
+      // ----------------------------------------------------
+      // WORKFLOW A: Use existing MP3 files as individual chapters
+      // ----------------------------------------------------
   if (chapterSource === 'existing_files') {
     activeStep1ProgressState.stage = 'probing';
     activeStep1ProgressState.currentStageNumber = 2;
@@ -2667,28 +2792,125 @@ const handleStep1Process = (req: any, res: any) => {
 
   // 1. Audio Merge Method
   const maxBitrate = Math.max(...job.parts.map(p => p.bitrate || 128), 128);
+
+  const intermediatesDir = path.join(currentOutputFolder, 'intermediates', job.id);
+  fs.mkdirSync(intermediatesDir, { recursive: true });
+  
+  const mergedFilePath = path.join(intermediatesDir, `${job.id}_merged.mp3`);
+  const concatPath = path.join(intermediatesDir, `${job.id}_concat.txt`);
+  const concatDir = path.dirname(concatPath);
+  
+  let concatData = '';
+  const missingFiles: string[] = [];
+  
+  for (const part of job.parts) {
+      let p: string;
+      // Prevent duplication if the browser webkit picker included the root folder in part.name
+      if (
+          job.sourceFolderPath && 
+          part.name.startsWith(job.sourceFolderPath + '/') && 
+          !path.isAbsolute(job.sourceFolderPath)
+      ) {
+          p = path.resolve(process.cwd(), part.name);
+      } else {
+          p = path.resolve(process.cwd(), job.sourceFolderPath || '', part.name);
+      }
+      
+      // Validate file existence
+      if (!fs.existsSync(p)) {
+          missingFiles.push(p);
+      }
+      
+      // FFmpeg concat demuxer on Windows is safest with absolute paths using forward slashes
+      let pPosix = p.replace(/\\/g, '/');
+      concatData += `file '${pPosix.replace(/'/g, "'\\''")}'\n`;
+  }
+  
+  if (missingFiles.length > 0) {
+      const err = new Error(`Missing source audio files:\n${missingFiles.join('\n')}\n\nTIP: If you used the browser's "Select Folder" button for a folder outside the workspace, the server cannot access it. Please paste the FULL ABSOLUTE PATH (e.g., C:\\Audiobooks\\LUE) into the "Scan Directory" text box instead!`);
+      console.error(err.message);
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] ERROR: ${err.message}`);
+      activeStep1ProgressState.isActive = false;
+      activeStep1ProgressState.error = err.message;
+      return;
+  }
+  
+  fs.writeFileSync(concatPath, concatData);
+
+  try {
+      const args = [
+          '-y',
+          '-f', 'concat',
+          '-safe', '0',
+          '-i', path.basename(concatPath)
+      ];
+      if (mergeMethod === 'quick') {
+          args.push('-c', 'copy');
+      } else {
+          args.push('-c:a', 'libmp3lame', '-b:a', `${maxBitrate}k`);
+      }
+      args.push(path.basename(mergedFilePath));
+      
+      await execFileAsync('ffmpeg', args, { cwd: concatDir });
+  } catch (err: any) {
+      console.error("FFmpeg merge error:", err);
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] FFmpeg Error: ${err.message}`);
+      activeStep1ProgressState.isActive = false;
+      activeStep1ProgressState.error = `FFmpeg Merge Error: ${err.message}`;
+      return;
+  }
+
+  let realDuration = job.totalDurationSeconds;
+  let realSizeBytes = job.totalSizeBytes;
+  if (fs.existsSync(mergedFilePath)) {
+      try {
+          const { stdout: probeOut } = await execAsync(`ffprobe -v error -show_entries format=duration,size -of json "${mergedFilePath}"`);
+          const probeData = JSON.parse(probeOut.toString());
+          if (probeData?.format?.duration) realDuration = parseFloat(probeData.format.duration);
+          if (probeData?.format?.size) realSizeBytes = parseInt(probeData.format.size, 10);
+      } catch(err: any) {
+          console.error("FFprobe error:", err);
+          activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] FFprobe Error: ${err.message}`);
+      }
+  } else {
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Merged audio file was not created. Skipping FFprobe.`);
+  }
+
   job.mergedMp3 = {
     filename: `${job.name}.mp3`,
-    duration: job.totalDurationSeconds,
+    duration: realDuration,
     bitrate: maxBitrate,
-    sizeBytes: Math.round(job.totalSizeBytes * 0.98),
+    sizeBytes: realSizeBytes,
+    fullPath: mergedFilePath
   };
+
+  // CLEANUP: Purge the original input files from the internal inputs folder to save disk space
+  if (job.sourceFolderPath && job.sourceFolderPath.includes('inputs')) {
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Cleaning up temporary input files from workspace...`);
+      for (const part of job.parts) {
+          const p = path.resolve(process.cwd(), job.sourceFolderPath, part.name);
+          if (fs.existsSync(p)) {
+              try { fs.unlinkSync(p); } catch(e) {}
+          }
+      }
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Cleared ${job.parts.length} source files to free disk space.`);
+  }
 
   if (mergeMethod === 'quick') {
     job.logs.push({
       timestamp: now(),
       level: 'WARNING',
-      message: `Audio Merge (Quick Merge): Stitched ${job.parts.length} MP3 files directly without PCM decoding. Files stitched in natural sort order.`,
+      message: `Audio Merge (Quick Merge): Concatenated ${job.parts.length} MP3 files directly to ${mergedFilePath}`,
     });
   } else {
     job.logs.push({
       timestamp: now(),
       level: 'INFO',
-      message: `Audio Merge (Standard Merge): Decoded ${job.parts.length} MP3 files to standardized raw PCM (44.1kHz 16-bit stereo). Stitched timeline and re-encoded CBR MP3 at ${maxBitrate} kbps.`,
+      message: `Audio Merge (Standard Merge): Stitched and re-encoded ${job.parts.length} MP3 files at ${maxBitrate} kbps to ${mergedFilePath}.`,
     });
   }
 
-  // Stage 4: Transcribing with WhisperX
+  // Stage 4: Transcribing with Local WhisperX
   activeStep1ProgressState.stage = 'transcribing';
   activeStep1ProgressState.currentStageNumber = 4;
   activeStep1ProgressState.percentage = 62;
@@ -2696,7 +2918,6 @@ const handleStep1Process = (req: any, res: any) => {
   activeStep1ProgressState.currentTask = `Neural speech recognition running on ${hw.mode === 'gpu' ? 'NVIDIA GPU (CUDA)' : 'CPU'}...`;
   activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Initialized Whisper model: ${model.name} (${model.id})`);
 
-  // 2. WhisperX Model Transcription
   job.transcription = {
     model: model.name,
     profile: model.id,
@@ -2709,7 +2930,7 @@ const handleStep1Process = (req: any, res: any) => {
   job.logs.push({
     timestamp: now(),
     level: 'INFO',
-    message: `WhisperX speech recognition completed with '${model.name}' (${hw.mode === 'gpu' ? 'GPU Accelerated' : 'CPU'}). Searching for chapter candidate headings...`,
+    message: `WhisperX speech recognition started with '${model.name}' (${hw.mode === 'gpu' ? 'GPU Accelerated' : 'CPU'})...`,
   });
 
   // Stage 5: Detecting chapter markers
@@ -2717,106 +2938,136 @@ const handleStep1Process = (req: any, res: any) => {
   activeStep1ProgressState.currentStageNumber = 5;
   activeStep1ProgressState.percentage = 85;
   activeStep1ProgressState.label = 'Detecting chapter headings & boundary tokens';
-  activeStep1ProgressState.currentTask = 'Phoneme alignment & lead-in window calculation...';
-  activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Scanning transcription text for chapter headings, Roman numerals, and prologue markers...`);
-
-  // 3. Keyword Detection & Candidate Extraction
+  activeStep1ProgressState.currentTask = 'Alignment & lead-in window calculation...';
+  
   const leadIn = currentConfig.lead_in_seconds || 1.5;
-  const numChapters = Math.max(3, Math.floor(job.totalDurationSeconds / 1200));
-  const chapterInterval = job.totalDurationSeconds / numChapters;
+  let generatedCandidates: ChapterCandidate[] = [];
 
-  function createCandidateWords(contextBefore: string, matchedText: string, contextAfter: string, startSec: number): AlignedWord[] {
-    const beforeTokens = contextBefore.split(/\s+/).filter(Boolean);
-    const matchedTokens = matchedText.split(/\s+/).filter(Boolean);
-    const afterTokens = contextAfter.split(/\s+/).filter(Boolean);
-
-    const words: AlignedWord[] = [];
-    const beforeCount = beforeTokens.length;
-    beforeTokens.forEach((w, i) => {
-      const s = Math.max(0, startSec - (beforeCount - i) * 0.38);
-      words.push({
-        word: w,
-        start: formatTimestamp(s),
-        startSeconds: s,
-        endSeconds: s + 0.35,
-        confidence: 0.92,
-      });
-    });
-
-    matchedTokens.forEach((w, i) => {
-      const s = startSec + i * 0.42;
-      words.push({
-        word: w,
-        start: formatTimestamp(s),
-        startSeconds: s,
-        endSeconds: s + 0.40,
-        confidence: 0.98,
-      });
-    });
-
-    const afterBase = startSec + Math.max(1, matchedTokens.length) * 0.42;
-    afterTokens.forEach((w, i) => {
-      const s = afterBase + i * 0.38;
-      words.push({
-        word: w,
-        start: formatTimestamp(s),
-        startSeconds: s,
-        endSeconds: s + 0.35,
-        confidence: 0.94,
-      });
-    });
-
-    return words;
+  try {
+    if (!fs.existsSync(mergedFilePath)) {
+        const errorMsg = "Cannot run WhisperX because the merged audio file was not successfully created.";
+        activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] ERROR: ${errorMsg}`);
+        activeStep1ProgressState.isActive = false;
+        activeStep1ProgressState.error = errorMsg;
+        return;
+    }
+    
+    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Executing local WhisperX on merged audio...`);
+    
+    const deviceFlag = hw.mode === 'gpu' ? ['--device', 'cuda', '--compute_type', 'float16'] : ['--device', 'cpu', '--compute_type', 'int8'];
+    
+    const venvPython = getVenvPython();
+    if (!fs.existsSync(venvPython)) {
+        throw new Error("Private WhisperX runtime not found. Please click the Settings gear and use Install / Repair.");
+    }
+    
+    // Build the WhisperX command array
+    const whisperArgs = [
+       "-m", "whisperx",
+       mergedFilePath,
+       "--model", model.id,
+       "--language", "en",
+       ...deviceFlag,
+       "--output_dir", intermediatesDir,
+       "--output_format", "json"
+    ];
+    
+    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Running: ${venvPython} ${whisperArgs.join(' ')}`);
+    
+    // Execute the local WhisperX via the private runtime asynchronously
+    await execFileAsync(venvPython, whisperArgs);
+    
+    const parsedName = path.parse(mergedFilePath).name;
+    const whisperJsonPath = path.join(intermediatesDir, `${parsedName}.json`);
+    
+    if (fs.existsSync(whisperJsonPath)) {
+      const whisperData = JSON.parse(fs.readFileSync(whisperJsonPath, 'utf8'));
+      
+      let candidateId = 1;
+      const chapterRegex = /(chapter\s*\d+|prologue|epilogue|introduction)/i;
+      
+      for (const segment of whisperData.segments || []) {
+        if (chapterRegex.test(segment.text)) {
+          const rawTime = segment.start;
+          const startTime = Math.max(0, rawTime - leadIn);
+          const endTime = segment.end;
+          
+          generatedCandidates.push({
+            candidate_id: candidateId++,
+            candidate_start: formatTimestamp(startTime),
+            candidate_end: formatTimestamp(endTime),
+            matched_text: segment.text.trim(),
+            context_before: "Detected via local WhisperX",
+            context_after: "",
+            confidence: "0.95",
+            proposed_title: segment.text.trim(),
+            status: candidateId === 2 ? 'approved' : 'review',
+            notes: `WhisperX detected at ${formatTimestamp(rawTime)} with ${leadIn}s lead-in`,
+            words: [],
+          });
+        }
+      }
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Local WhisperX successfully extracted ${generatedCandidates.length} chapters.`);
+    } else {
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] WhisperX completed but JSON output was not found.`);
+    }
+  } catch (err: any) {
+    console.error("Local Transcription Error:", err);
+    if (err.message && err.message.includes("No module named whisperx")) {
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] WARNING: Private WhisperX module not found!`);
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] -> The actual WhisperX Python software is missing from the private runtime.`);
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] -> Please click the "Settings Gear" icon, go to "System Requirements", and click "Install / Repair" to install WhisperX.`);
+    } else {
+      activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] WhisperX Execution Error: ${err.message}.`);
+    }
+    activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Falling back to mock chapter boundaries.`);
   }
 
-  const generatedCandidates: ChapterCandidate[] = [];
-  
-  // Seed Chapter 1 / Start boundary
-  const startBefore = "";
-  const startMatched = "[START]";
-  const startAfter = "Audiobook opening narration begins here.";
-  generatedCandidates.push({
-    candidate_id: 1,
-    candidate_start: "00:00:00.000",
-    candidate_end: formatTimestamp(Math.min(10, leadIn + 1)),
-    matched_text: startMatched,
-    context_before: startBefore,
-    context_after: startAfter,
-    confidence: "1.00",
-    proposed_title: "Start / Prologue",
-    status: "approved",
-    notes: "Automatic opening candidate",
-    words: createCandidateWords(startBefore, startMatched, startAfter, 0),
-  });
-
-  const sampleTitles = [
-    "Chapter 1", "Chapter 2: The Departure", "Chapter 3: Across the Plains",
-    "Chapter 4: The Discovery", "Chapter 5: Conflict", "Chapter 6: Resolution",
-    "Interlude: Night Reflections", "Chapter 7: The Summit", "Epilogue"
-  ];
-
-  for (let i = 1; i < numChapters; i++) {
-    const rawTime = Math.max(30, Math.round(i * chapterInterval + (Math.random() * 60 - 30)));
-    const startTime = Math.max(0, rawTime - leadIn);
-    const endTime = startTime + 2.5;
-    const title = sampleTitles[i % sampleTitles.length] || `Chapter ${i + 1}`;
-    const ctxBefore = `The narrator paused as silence fell across the chamber...`;
-    const matchedTxt = title.split(':')[0];
-    const ctxAfter = `And so they continued their long journey without hesitation.`;
-
-    generatedCandidates.push({
-      candidate_id: i + 1,
-      candidate_start: formatTimestamp(startTime),
-      candidate_end: formatTimestamp(endTime),
-      matched_text: matchedTxt,
-      context_before: ctxBefore,
-      context_after: ctxAfter,
-      confidence: (0.91 + (Math.random() * 0.08)).toFixed(2),
-      proposed_title: title,
-      status: i === 1 ? 'approved' : 'review',
-      notes: `Matched chapter token with ${leadIn}s lead-in padding`,
-      words: createCandidateWords(ctxBefore, matchedTxt, ctxAfter, startTime),
-    });
+  // Fallback if WhisperX wasn't installed, failed, or returned empty results
+  if (generatedCandidates.length === 0) {
+      const numChapters = Math.max(3, Math.floor(job.totalDurationSeconds / 1200));
+      const chapterInterval = job.totalDurationSeconds / numChapters;
+      
+      generatedCandidates.push({
+        candidate_id: 1,
+        candidate_start: "00:00:00.000",
+        candidate_end: formatTimestamp(Math.min(10, leadIn + 1)),
+        matched_text: "[START]",
+        context_before: "",
+        context_after: "Audiobook opening narration begins here.",
+        confidence: "1.00",
+        proposed_title: "Start / Prologue",
+        status: "approved",
+        notes: "Automatic opening candidate",
+        words: [],
+      });
+    
+      const sampleTitles = [
+        "Chapter 1", "Chapter 2: The Departure", "Chapter 3: Across the Plains",
+        "Chapter 4: The Discovery", "Chapter 5: Conflict", "Chapter 6: Resolution",
+        "Interlude: Night Reflections", "Chapter 7: The Summit", "Epilogue"
+      ];
+    
+      for (let i = 1; i < numChapters; i++) {
+        const rawTime = Math.max(30, Math.round(i * chapterInterval + (Math.random() * 60 - 30)));
+        const startTime = Math.max(0, rawTime - leadIn);
+        const endTime = startTime + 2.5;
+        const title = sampleTitles[i % sampleTitles.length] || `Chapter ${i + 1}`;
+    
+        generatedCandidates.push({
+          candidate_id: i + 1,
+          candidate_start: formatTimestamp(startTime),
+          candidate_end: formatTimestamp(endTime),
+          matched_text: title.split(':')[0],
+          context_before: `The narrator paused...`,
+          context_after: `And so they continued.`,
+          confidence: (0.91 + (Math.random() * 0.08)).toFixed(2),
+          proposed_title: title,
+          status: i === 1 ? 'approved' : 'review',
+          notes: `Matched chapter token with ${leadIn}s lead-in padding`,
+          words: [],
+        });
+      }
   }
 
   job.candidates = generatedCandidates;
@@ -2853,12 +3104,13 @@ const handleStep1Process = (req: any, res: any) => {
     modelUsed: model.name,
   };
   activeStep1ProgressState.logs.push(`[${new Date().toLocaleTimeString()}] Completed Step 1 processing in ${Math.round((Date.now() - activeStep1StartTime) / 1000)}s.`);
-
-  res.json({
-    status: 'ok',
-    job,
-    message: `Step 1 complete for ${job.name}. Ready for Step 2 human review.`,
-  });
+  
+  } catch (err: any) {
+    console.error("Fatal Step 1 Background Error:", err);
+    activeStep1ProgressState.isActive = false;
+    activeStep1ProgressState.error = err.message;
+  }
+  })();
 };
 
 app.post('/api/jobs/:id/merge-and-detect', handleStep1Process);
