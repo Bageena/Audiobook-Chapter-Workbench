@@ -6,7 +6,7 @@
 
 > **Status: Work in Progress**
 >
-> Audiobook Workbench is under active development, testing, and refinement. It is not yet recommended for general installation or production use.
+> Audiobook Workbench is under active development, testing, and refinement. It is not yet recommended for general installation or production use. There are still many bugs with it and trying to get whisper to run properly without creating a PATH for it on my local machine. 
 
 ## Overview
 
